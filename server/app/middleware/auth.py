@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from fastapi import Depends, HTTPException, Request
 import jwt
+from jwt import PyJWKClient
 
 from app.config import Settings, get_settings
 from app.dependencies import get_supabase
@@ -10,6 +12,11 @@ from app.dependencies import get_supabase
 class CurrentUser:
     id: str
     college_id: str | None = None
+
+
+@lru_cache
+def _get_jwk_client(jwks_url: str) -> PyJWKClient:
+    return PyJWKClient(jwks_url, cache_keys=True, lifespan=3600)
 
 
 async def get_current_user(
@@ -23,10 +30,13 @@ async def get_current_user(
     token = auth_header.split(" ", 1)[1]
 
     try:
+        jwk_client = _get_jwk_client(settings.supabase_jwks_url)
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+
         payload = jwt.decode(
             token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
+            signing_key.key,
+            algorithms=["ES256"],
             audience="authenticated",
         )
     except jwt.ExpiredSignatureError:

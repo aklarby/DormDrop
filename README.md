@@ -38,7 +38,6 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=your-secret-key
-SUPABASE_JWT_SECRET=your-jwt-secret
 OPENAI_API_KEY=your-openai-key
 ```
 
