@@ -122,7 +122,7 @@ export default function SellPage() {
         const file = batch[i];
         const photo = staged[i];
         const ext = file.name.split(".").pop() || "jpg";
-        const path = `staging/${user.id}/${Date.now()}-${photo.id}.${ext}`;
+        const path = `${user.id}/${Date.now()}-${photo.id}.${ext}`;
 
         try {
           const { error } = await supabase.storage
@@ -209,21 +209,27 @@ export default function SellPage() {
 
     try {
       const result = await api.post<{
-        title?: string;
-        description?: string;
-        category?: string;
-        condition?: string;
-        price_cents?: number;
-      }>("/listings/ai-populate", { image_url: photos[0].publicUrl }, token);
+        suggestions?: {
+          title?: string;
+          description?: string;
+          category?: string;
+          condition?: string;
+          price_cents?: number;
+        };
+        error?: string;
+      }>("/listings/ai-populate", { storage_path: photos[0].storagePath }, token);
 
-      setForm((prev) => ({
-        ...prev,
-        title: result.title || prev.title,
-        description: result.description || prev.description,
-        category: result.category || prev.category,
-        condition: result.condition || prev.condition,
-        price: result.price_cents ? (result.price_cents / 100).toString() : prev.price,
-      }));
+      const s = result.suggestions;
+      if (s) {
+        setForm((prev) => ({
+          ...prev,
+          title: s.title || prev.title,
+          description: s.description || prev.description,
+          category: s.category || prev.category,
+          condition: s.condition || prev.condition,
+          price: s.price_cents ? (s.price_cents / 100).toString() : prev.price,
+        }));
+      }
       setAiPopulated(true);
     } catch {
       // AI unavailable — user fills manually
@@ -259,7 +265,7 @@ export default function SellPage() {
         condition: form.condition,
         price_cents: Math.round(Number(form.price) * 100),
         is_negotiable: form.is_negotiable,
-        photos: photos.map((p) => p.storagePath),
+        photos: photos.map((p, i) => ({ order: i, path: p.storagePath })),
       };
       const result = await api.post<ListingResponse>("/listings", body, token);
       setListing(result);

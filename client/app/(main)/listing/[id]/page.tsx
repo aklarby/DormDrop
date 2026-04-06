@@ -77,6 +77,7 @@ export default function ListingDetailPage() {
   const isOwner = user?.id === listing?.student_id;
 
   useEffect(() => {
+    if (!token) return;
     setLoading(true);
     api
       .get<ListingDetail>(`/listings/${id}`, token)
@@ -88,8 +89,8 @@ export default function ListingDetailPage() {
   useEffect(() => {
     if (!token) return;
     api
-      .get<{ listing_id: string }[]>("/saved", token)
-      .then((d) => setSaved(d.some((s) => s.listing_id === id)))
+      .get<{ data: { listing_id: string }[] }>("/saved", token)
+      .then((res) => setSaved((res.data ?? []).some((s) => s.listing_id === id)))
       .catch(() => {});
   }, [id, token]);
 
@@ -375,7 +376,7 @@ export default function ListingDetailPage() {
                   src={
                     listing.students.pfp_path
                       ? getSupabaseImageUrl(
-                          "profile_photos",
+                          "profile_pictures",
                           listing.students.pfp_path
                         )
                       : null

@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from typing import Any
-
 from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user
 from app.constants import CATEGORIES, CONDITIONS, LISTING_STATUSES
@@ -13,6 +11,11 @@ from app.services.storage import move_from_staging, delete_file
 router = APIRouter()
 
 
+class PhotoEntry(BaseModel):
+    order: int
+    path: str
+
+
 class CreateListingRequest(BaseModel):
     title: str
     description: str | None = None
@@ -20,7 +23,7 @@ class CreateListingRequest(BaseModel):
     condition: str
     price_cents: int
     is_negotiable: bool = False
-    photos: list[dict[str, Any]]
+    photos: list[PhotoEntry]
 
 
 class UpdateListingRequest(BaseModel):
@@ -135,7 +138,7 @@ async def create_listing(
         "condition": body.condition,
         "price_cents": body.price_cents,
         "is_negotiable": body.is_negotiable,
-        "photos": body.photos,
+        "photos": [p.model_dump() for p in body.photos],
         "expires_at": expires_at,
     }).execute()
 
@@ -206,7 +209,7 @@ async def extend_listing(
 
 
 class AiPopulateRequest(BaseModel):
-    image_url: str
+    storage_path: str
 
 
 @router.post("/ai-populate")
@@ -214,8 +217,11 @@ async def ai_populate(
     body: AiPopulateRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    result = await auto_populate_from_image(body.image_url)
-    return result
+    try:
+        result = await auto_populate_from_image(body.storage_path)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI service error: {exc}")
 
 
 @router.delete("/{listing_id}")
