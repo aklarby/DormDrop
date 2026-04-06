@@ -20,10 +20,10 @@ async def get_my_profile(current_user: CurrentUser = Depends(get_current_user)):
         supabase.table("students")
         .select("*, colleges(name, logo_path)")
         .eq("id", current_user.id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Profile not found")
     return result.data
 

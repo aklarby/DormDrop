@@ -47,11 +47,12 @@ export default function ProfilePage() {
     async function load() {
       setLoading(true);
       try {
-        const [studentData, allListings] = await Promise.all([
+        const [studentData, listingsRes] = await Promise.all([
           api.get<Student>(`/students/${id}`, token),
-          api.get<Listing[]>("/listings", token),
+          api.get<{ data: Listing[]; count: number }>("/listings", token),
         ]);
         setStudent(studentData);
+        const allListings = listingsRes.data ?? [];
         setListings(
           allListings.filter((l) => l.seller_id === id && l.status === "active")
         );
@@ -84,7 +85,7 @@ export default function ProfilePage() {
     );
   }
 
-  const avatarUrl = getSupabaseImageUrl("avatars", student.pfp_path);
+  const avatarUrl = getSupabaseImageUrl("profile_pictures", student.pfp_path);
   const memberSince = new Date(student.created_at).toLocaleDateString(
     "en-US",
     { month: "short", year: "numeric" }

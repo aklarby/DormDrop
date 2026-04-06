@@ -56,6 +56,7 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       await signUp(email, password);
+      localStorage.setItem("dormdrop_pending_display_name", displayName);
       setStep("verify");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign up failed");

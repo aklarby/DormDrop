@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
+import { api } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,7 +21,20 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      await signIn(email, password);
+      const { session } = await signIn(email, password);
+      const token = session?.access_token;
+
+      if (token) {
+        try {
+          await api.get("/students/me", token);
+        } catch {
+          const pendingName = localStorage.getItem("dormdrop_pending_display_name");
+          const displayName = pendingName || email.split("@")[0];
+          await api.post("/auth/complete-signup", { display_name: displayName }, token);
+          localStorage.removeItem("dormdrop_pending_display_name");
+        }
+      }
+
       router.push("/browse");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed");

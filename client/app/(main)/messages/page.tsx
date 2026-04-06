@@ -11,32 +11,66 @@ import { createClient } from "@/lib/supabase/client";
 import { api } from "@/lib/api";
 import { cn, timeAgo, getSupabaseImageUrl } from "@/lib/utils";
 
+interface ConversationRaw {
+  id: string;
+  listing_id: string;
+  buyer_id: string;
+  seller_id: string;
+  status: string;
+  listings: {
+    id: string;
+    title: string;
+    photos: { order: number; path: string }[];
+    price_cents: number;
+  };
+  buyer: {
+    id: string;
+    display_name: string;
+    pfp_path: string | null;
+  };
+  seller: {
+    id: string;
+    display_name: string;
+    pfp_path: string | null;
+    venmo_handle: string | null;
+  };
+}
+
 interface Conversation {
   id: string;
   listing: {
     id: string;
     title: string;
-    photos: string[];
+    photos: { order: number; path: string }[];
   };
   other_user: {
     id: string;
     display_name: string;
-    avatar_url: string | null;
+    pfp_path: string | null;
     venmo_handle?: string | null;
   };
   last_message: {
-    content: string;
+    body: string;
     created_at: string;
     sender_id: string;
   } | null;
   unread_count: number;
 }
 
+interface MessageRaw {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+  is_read: boolean;
+}
+
 interface Message {
   id: string;
   conversation_id: string;
   sender_id: string;
-  content: string;
+  body: string;
   created_at: string;
 }
 
@@ -62,14 +96,32 @@ function MessagesContent() {
 
   // fetch conversation list
   useEffect(() => {
-    if (!token) return;
+    if (!token || !user) return;
     setConvoLoading(true);
     api
-      .get<Conversation[]>("/conversations", token)
-      .then(setConversations)
+      .get<{ data: ConversationRaw[] }>("/conversations", token)
+      .then((res) => {
+        const mapped: Conversation[] = (res.data ?? []).map((c) => {
+          const isBuyer = c.buyer_id === user.id;
+          const other = isBuyer ? c.seller : c.buyer;
+          return {
+            id: c.id,
+            listing: { id: c.listings.id, title: c.listings.title, photos: c.listings.photos },
+            other_user: {
+              id: other.id,
+              display_name: other.display_name,
+              pfp_path: other.pfp_path,
+              venmo_handle: isBuyer ? c.seller.venmo_handle : null,
+            },
+            last_message: null,
+            unread_count: 0,
+          };
+        });
+        setConversations(mapped);
+      })
       .catch(() => toast("Failed to load conversations", "error"))
       .finally(() => setConvoLoading(false));
-  }, [token, toast]);
+  }, [token, user, toast]);
 
   // auto-open from URL param after conversations load
   useEffect(() => {
@@ -87,8 +139,17 @@ function MessagesContent() {
     setMsgsLoading(true);
     setMessages([]);
     api
-      .get<Message[]>(`/conversations/${activeId}/messages`, token)
-      .then(setMessages)
+      .get<{ data: MessageRaw[] }>(`/conversations/${activeId}/messages`, token)
+      .then((res) => {
+        const msgs: Message[] = (res.data ?? []).map((m) => ({
+          id: m.id,
+          conversation_id: m.conversation_id,
+          sender_id: m.sender_id,
+          body: m.body,
+          created_at: m.created_at,
+        }));
+        setMessages(msgs.reverse());
+      })
       .catch(() => toast("Failed to load messages", "error"))
       .finally(() => setMsgsLoading(false));
 
@@ -114,20 +175,26 @@ function MessagesContent() {
           filter: `conversation_id=eq.${activeId}`,
         },
         (payload) => {
-          const msg = payload.new as Message;
+          const raw = payload.new as MessageRaw;
+          const msg: Message = {
+            id: raw.id,
+            conversation_id: raw.conversation_id,
+            sender_id: raw.sender_id,
+            body: raw.body,
+            created_at: raw.created_at,
+          };
           if (msg.sender_id === user.id) return;
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
             return [...prev, msg];
           });
-          // update last_message in list
           setConversations((prev) =>
             prev.map((c) =>
               c.id === activeId
                 ? {
                     ...c,
                     last_message: {
-                      content: msg.content,
+                      body: msg.body,
                       created_at: msg.created_at,
                       sender_id: msg.sender_id,
                     },
@@ -158,13 +225,13 @@ function MessagesContent() {
   const sendMessage = useCallback(async () => {
     if (!input.trim() || !activeId || !token || !user) return;
 
-    const content = input.trim();
+    const text = input.trim();
     const tempId = `temp-${Date.now()}`;
     const optimistic: Message = {
       id: tempId,
       conversation_id: activeId,
       sender_id: user.id,
-      content,
+      body: text,
       created_at: new Date().toISOString(),
     };
 
@@ -173,20 +240,26 @@ function MessagesContent() {
     setSending(true);
 
     try {
-      const real = await api.post<Message>(
+      const raw = await api.post<MessageRaw>(
         `/conversations/${activeId}/messages`,
-        { content },
+        { body: text },
         token
       );
+      const real: Message = {
+        id: raw.id,
+        conversation_id: raw.conversation_id,
+        sender_id: raw.sender_id,
+        body: raw.body,
+        created_at: raw.created_at,
+      };
       setMessages((prev) => prev.map((m) => (m.id === tempId ? real : m)));
-      // update conversation list
       setConversations((prev) =>
         prev.map((c) =>
           c.id === activeId
             ? {
                 ...c,
                 last_message: {
-                  content: real.content,
+                  body: real.body,
                   created_at: real.created_at,
                   sender_id: real.sender_id,
                 },
@@ -197,7 +270,7 @@ function MessagesContent() {
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       toast("Failed to send message", "error");
-      setInput(content);
+      setInput(text);
     } finally {
       setSending(false);
     }
@@ -258,8 +331,9 @@ function MessagesContent() {
             </div>
           ) : (
             conversations.map((c) => {
-              const thumb = c.listing.photos?.[0]
-                ? getSupabaseImageUrl("listing_photos", c.listing.photos[0])
+              const firstPhoto = c.listing.photos?.[0];
+              const thumb = firstPhoto
+                ? getSupabaseImageUrl("listing_photos", typeof firstPhoto === "string" ? firstPhoto : firstPhoto.path)
                 : null;
               return (
                 <button
@@ -299,7 +373,7 @@ function MessagesContent() {
                     {c.last_message && (
                       <p className="mt-0.5 truncate text-xs text-[var(--color-secondary)]">
                         {c.last_message.sender_id === user.id ? "You: " : ""}
-                        {c.last_message.content}
+                        {c.last_message.body}
                       </p>
                     )}
                   </div>
@@ -334,7 +408,7 @@ function MessagesContent() {
                 <ArrowLeft size={18} />
               </button>
               <Avatar
-                src={active.other_user.avatar_url}
+                src={active.other_user.pfp_path ? getSupabaseImageUrl("profile_pictures", active.other_user.pfp_path) : undefined}
                 alt={active.other_user.display_name}
                 fallback={active.other_user.display_name?.[0]}
                 size="sm"
@@ -389,7 +463,7 @@ function MessagesContent() {
                                 : "bg-[var(--color-surface-sunken)] text-[var(--color-primary)]"
                             )}
                           >
-                            {msg.content}
+                            {msg.body}
                           </div>
                         </div>
                       </div>

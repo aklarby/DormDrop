@@ -36,8 +36,9 @@ export default function SavedPage() {
   const fetchSaved = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await api.get<SavedItem[]>("/saved", token);
-      const extracted = data
+      const res = await api.get<{ data: SavedItem[] }>("/saved", token);
+      const items = res.data ?? [];
+      const extracted = items
         .map((item) => item.listing || item.listings)
         .filter((l): l is Listing => !!l);
       setListings(extracted);

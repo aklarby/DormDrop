@@ -115,13 +115,14 @@ function BrowseContent() {
     cursorRef.current = null;
 
     api
-      .get<Listing[]>(`/listings?${buildQuery()}`, token)
-      .then((data) => {
+      .get<{ data: Listing[]; count: number }>(`/listings?${buildQuery()}`, token)
+      .then((res) => {
         if (cancelled) return;
-        setListings(data);
-        setHasMore(data.length === PAGE_SIZE);
+        const items = res.data ?? [];
+        setListings(items);
+        setHasMore(items.length === PAGE_SIZE);
         cursorRef.current =
-          data.length > 0 ? data[data.length - 1].created_at : null;
+          items.length > 0 ? items[items.length - 1].created_at : null;
       })
       .catch(() => {})
       .finally(() => {
@@ -136,8 +137,8 @@ function BrowseContent() {
   useEffect(() => {
     if (!token) return;
     api
-      .get<{ listing_id: string }[]>("/saved", token)
-      .then((data) => setSavedIds(new Set(data.map((s) => s.listing_id))))
+      .get<{ data: { listing_id: string }[] }>("/saved", token)
+      .then((res) => setSavedIds(new Set((res.data ?? []).map((s) => s.listing_id))))
       .catch(() => {});
   }, [token]);
 
@@ -145,14 +146,15 @@ function BrowseContent() {
     if (!cursorRef.current || loadingMore) return;
     setLoadingMore(true);
     try {
-      const data = await api.get<Listing[]>(
+      const res = await api.get<{ data: Listing[]; count: number }>(
         `/listings?${buildQuery(cursorRef.current)}`,
         token
       );
-      setListings((prev) => [...prev, ...data]);
-      setHasMore(data.length === PAGE_SIZE);
+      const items = res.data ?? [];
+      setListings((prev) => [...prev, ...items]);
+      setHasMore(items.length === PAGE_SIZE);
       cursorRef.current =
-        data.length > 0 ? data[data.length - 1].created_at : null;
+        items.length > 0 ? items[items.length - 1].created_at : null;
     } catch {
       /* swallow */
     }

@@ -1,6 +1,8 @@
+import ssl
 from dataclasses import dataclass
 from functools import lru_cache
 from fastapi import Depends, HTTPException, Request
+import certifi
 import jwt
 from jwt import PyJWKClient
 
@@ -16,7 +18,8 @@ class CurrentUser:
 
 @lru_cache
 def _get_jwk_client(jwks_url: str) -> PyJWKClient:
-    return PyJWKClient(jwks_url, cache_keys=True, lifespan=3600)
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    return PyJWKClient(jwks_url, cache_keys=True, lifespan=3600, ssl_context=ctx)
 
 
 async def get_current_user(
@@ -50,6 +53,8 @@ async def get_current_user(
 
     supabase = get_supabase()
     result = supabase.table("students").select("college_id").eq("id", user_id).maybe_single().execute()
-    college_id = result.data["college_id"] if result.data else None
+    college_id = None
+    if result and result.data:
+        college_id = result.data.get("college_id")
 
     return CurrentUser(id=user_id, college_id=college_id)

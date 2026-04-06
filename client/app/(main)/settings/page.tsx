@@ -71,15 +71,16 @@ export default function SettingsPage() {
 
     async function load() {
       try {
-        const [profileData, allListings] = await Promise.all([
+        const [profileData, listingsRes] = await Promise.all([
           api.get<StudentProfile>("/students/me", token),
-          api.get<Listing[]>("/listings", token),
+          api.get<{ data: Listing[]; count: number }>("/listings", token),
         ]);
         setProfile(profileData);
         setDisplayName(profileData.display_name || "");
         setBio(profileData.bio || "");
         setVenmoHandle(profileData.venmo_handle || "");
-        setAvatarPreview(getSupabaseImageUrl("avatars", profileData.pfp_path));
+        setAvatarPreview(getSupabaseImageUrl("profile_pictures", profileData.pfp_path));
+        const allListings = listingsRes.data ?? [];
         setListings(
           allListings.filter((l) => l.seller_id === profileData.id)
         );

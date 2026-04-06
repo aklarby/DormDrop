@@ -60,7 +60,7 @@ async def complete_signup(
         .maybe_single()
         .execute()
     )
-    if existing.data:
+    if existing and existing.data:
         raise HTTPException(status_code=409, detail="Student profile already exists")
 
     user_resp = supabase.auth.admin.get_user_by_id(current_user.id)
@@ -71,9 +71,11 @@ async def complete_signup(
         supabase.table("colleges")
         .select("id")
         .eq("email_domain", domain)
-        .single()
+        .maybe_single()
         .execute()
     )
+    if not college_resp or not college_resp.data:
+        raise HTTPException(status_code=400, detail="College not found for this email domain")
 
     supabase.table("students").insert({
         "id": current_user.id,
