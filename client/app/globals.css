@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Instrument Sans", sans-serif;
+  --font-body: "Plus Jakarta Sans", sans-serif;
+
+  --color-brand: #C8754A;
+  --color-brand-light: #E8A97A;
+  --color-brand-muted: #C8754A33;
+  --color-brand-subtle: #FFF5EE;
+
+  --color-surface: #FAF8F5;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-sunken: #F0ECE6;
+  --color-surface-overlay: rgba(0, 0, 0, 0.5);
+
+  --color-primary: #2C2520;
+  --color-primary-hover: #1A1512;
+  --color-secondary: #8C7E72;
+  --color-muted: #B5A99B;
+  --color-faint: #D9D0C7;
+
+  --color-border: #E2DCD4;
+  --color-border-subtle: #EDE8E2;
+
+  --color-destructive: #C44A4A;
+  --color-destructive-hover: #A83A3A;
+
+  --color-success: #4A8C5C;
+}
+
+::selection {
+  background-color: var(--color-brand-muted);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-surface);
+  color: var(--color-primary);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-muted);
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--color-surface-sunken) 25%, var(--color-border-subtle) 50%, var(--color-surface-sunken) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.15s ease-out;
+}

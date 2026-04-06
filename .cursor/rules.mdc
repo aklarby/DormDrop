@@ -1,0 +1,155 @@
+---
+alwaysApply: true
+---
+
+# DormDrop — Style Rules
+
+## Purpose
+
+This document defines the aesthetic and implementation constraints for DormDrop's frontend. Every component, page, and interaction must follow these rules. The goal is a UI that feels intentionally designed — not like default Tailwind, not like a template, not like AI slop.
+
+---
+
+## Non-Negotiables
+
+- **No border-radius on structural elements.** Modals, panels, inputs, buttons, cards, dropdowns — all sharp corners. Rounded corners are permitted only on: avatar containers, status pills/badges, toggle thumbs, and spinner elements.
+- **No blue anywhere.** Not for buttons, links, focus rings, alerts, or any interactive element. Pick a brand accent and commit to it. Blue is the default of defaults — it signals "nobody made a decision here."
+- **No native browser controls.** No `alert()`, `confirm()`, `prompt()`, no native `<select>`, no native checkboxes. Every interactive element is custom.
+- **No bold button text.** Button labels are normal weight. Emphasis comes from background contrast and spatial hierarchy, not font weight.
+- **No cold grays.** Use warm neutrals (stone, sand, warm gray). Cold `gray-*` tones are banned from the palette.
+
+---
+
+## Typography
+
+- Pick a distinctive display/brand font. Do not use Inter, Roboto, Arial, or system-ui for display text. Body text can use a clean sans-serif but it should not be the same font every AI project defaults to.
+- Weight hierarchy: 400 is the baseline. 500 for labels and emphasis. 600 for modal titles and section headers only. Never go above 600 in the UI.
+- Size hierarchy: `text-xs` for metadata/labels, `text-sm` for body/inputs, `text-base`+ reserved for headings. The UI should feel compact and dense, not spacious and bloated.
+- Primary text and secondary/muted text must have clearly distinct colors — not just opacity differences.
+
+---
+
+## Color System
+
+- Define a single brand accent color. Use it sparingly: focus rings, active states, key highlights. Overuse kills it.
+- Define exactly one dark color for primary CTA button backgrounds.
+- Surface colors should be warm, not white. Use off-whites and warm neutrals for backgrounds, panels, and table headers.
+- Selection highlight (`::selection`) should use a tinted version of the brand accent.
+- Keep the overall palette tight — 6-8 intentional colors max. If you're reaching for a new color, you probably need to reuse an existing one.
+
+---
+
+## Borders & Dividers
+
+- Default borders: subtle, low-contrast. They separate content without competing with it.
+- Define two border weights: a default for inputs/cards, and a subtler one for section separators.
+- Focus states must be visible but not jarring. Use the brand accent or primary dark color — never browser-default blue outline.
+- Focus pattern: `focus:outline-none` + custom border/ring treatment. Always.
+
+---
+
+## Buttons
+
+Four tiers, no more:
+
+1. **Primary** — dark background, white text. The only "loud" button on any screen.
+2. **Secondary/Ghost** — no background, muted text, darkens on hover.
+3. **Outlined** — border, no fill, subtle hover background.
+4. **Destructive** — red background, white text. Used only for irreversible actions.
+
+Rules:
+- Every button gets `transition-colors` on hover.
+- Every async button gets `disabled:opacity-50 disabled:cursor-not-allowed`.
+- Loading state: inline spinner inside the button, not a separate loader.
+- One primary button per view/modal. If there are two, you haven't decided what the real action is.
+
+---
+
+## Inputs
+
+- Consistent height across the app. Pick `h-10` or `h-12` and commit.
+- Placeholder text is always muted/secondary color.
+- Focus border uses brand accent or primary dark — never default browser outline.
+- No border-radius.
+- Floating labels or standard label-above patterns are both fine, but pick one and use it everywhere.
+
+---
+
+## Modals
+
+- Render via `createPortal` to `document.body`. No z-index gambling.
+- Overlay: semi-transparent black. Click-to-close on overlay for non-destructive actions.
+- Structure: header (title left, close icon right, bottom border) → scrollable body → footer (cancel left, primary action right, top border).
+- `max-h-[90vh]` to prevent viewport overflow. Body scrolls, header/footer are fixed.
+- No border-radius on modal panel.
+- Destructive modals: no overlay click-to-close, destructive button style on primary action.
+
+---
+
+## Dropdowns & Menus
+
+- Custom dropdown components only. No native `<select>`.
+- Enter animation: subtle scale + opacity transition (0.1-0.2s).
+- Items: consistent padding, hover background, pointer cursor.
+- No border-radius on dropdown panel.
+
+---
+
+## Cards & Listings
+
+- Cards are the core unit of the marketplace. They must feel tactile but not heavy.
+- Image-forward: the photo is the primary element, text is secondary.
+- Price is always visually prominent — it's the first thing a buyer scans for after the image.
+- Status indicators (sold, reserved, expired) use small pills/badges — these are the exception where rounded corners are allowed.
+- Hover state on cards: subtle lift (shadow change) or border highlight. Not both.
+
+---
+
+## Icons
+
+- Pick one icon library and use it consistently. Do not mix icon sets.
+- Inline with text: 14-16px. Standalone action icons: 18-20px.
+- Icon color: inherit from text color or use secondary/muted. Hover to primary.
+
+---
+
+## Spacing & Density
+
+- The UI should feel compact. This is a utility app, not a marketing site.
+- Prefer `gap-2`/`gap-3` over `gap-4`/`gap-6` for most layouts.
+- Padding inside cards/panels: `p-3` or `p-4`, not `p-6` or `p-8`.
+- Whitespace is a tool — use it to create hierarchy, not to fill space.
+
+---
+
+## Animations & Transitions
+
+- `transition-colors duration-200` is the default for any hover/focus state.
+- Page/section transitions: subtle slide or fade. Nothing bouncy, nothing slow.
+- Loading spinners: small, inline, using border-based CSS animation.
+- Skeleton loaders for content that takes >200ms to load. Gray shimmer on warm neutral, not pulsing opacity.
+
+---
+
+## Responsive
+
+- Mobile-first. This app will be used on phones in dorm hallways more than on desktops.
+- Listing grid: 1 column on mobile, 2 on tablet, 3-4 on desktop.
+- Bottom sheet pattern for modals on mobile instead of centered overlay.
+- Touch targets: minimum 44px height on interactive elements for mobile.
+
+---
+
+## What Not To Do
+
+- No `rounded-lg` or `rounded-xl` on structural elements.
+- No blue in any form.
+- No generic font stacks (Inter, Roboto, system-ui for display).
+- No native browser UI elements.
+- No bold button text.
+- No cold gray palette.
+- No gratuitous gradients or glassmorphism.
+- No drop shadows heavier than `shadow-md` on cards.
+- No hover animations that take longer than 200ms.
+- No layout shifts on interaction — if something expands/collapses, it should be animated and predictable.
+- No inconsistent spacing — if two similar components have different padding, that's a bug.
