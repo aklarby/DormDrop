@@ -5,7 +5,7 @@ from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user
 from app.constants import CATEGORIES, CONDITIONS, LISTING_STATUSES
 from app.services.ai_populate import auto_populate_from_image
-from app.services.moderation import moderate_content
+from app.services.moderation import moderate_image, moderate_text
 from app.services.storage import move_from_staging, delete_file
 
 router = APIRouter()
@@ -126,6 +126,23 @@ async def create_listing(
     if len(body.photos) == 0 or len(body.photos) > 8:
         raise HTTPException(status_code=400, detail="Must include 1-8 photos")
 
+    text_mod = await moderate_text(f"{body.title}\n{body.description or ''}")
+    if text_mod["flagged"]:
+        flagged = ", ".join(text_mod["categories"].keys())
+        raise HTTPException(
+            status_code=422,
+            detail=f"Your listing text was flagged for: {flagged}. Please revise and try again.",
+        )
+
+    for photo in body.photos:
+        img_mod = await moderate_image(photo.path)
+        if img_mod["flagged"]:
+            flagged = ", ".join(img_mod["categories"].keys())
+            raise HTTPException(
+                status_code=422,
+                detail=f"A photo was flagged for: {flagged}. Please remove it and try again.",
+            )
+
     supabase = get_supabase()
     expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
 
@@ -206,6 +223,26 @@ async def extend_listing(
         .execute()
     )
     return result.data[0]
+
+
+class ModerateImageRequest(BaseModel):
+    storage_path: str
+
+
+@router.post("/moderate-image")
+async def moderate_image_endpoint(
+    body: ModerateImageRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Check a single uploaded image for policy violations before listing."""
+    result = await moderate_image(body.storage_path)
+    if result["flagged"]:
+        flagged = ", ".join(result["categories"].keys())
+        raise HTTPException(
+            status_code=422,
+            detail=f"This image was flagged for: {flagged}. Please use a different photo.",
+        )
+    return {"ok": True}
 
 
 class AiPopulateRequest(BaseModel):

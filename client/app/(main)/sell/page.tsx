@@ -132,6 +132,16 @@ export default function SellPage() {
 
           const { data } = supabase.storage.from("listing_photos").getPublicUrl(path);
 
+          try {
+            await api.post("/listings/moderate-image", { storage_path: path }, token);
+          } catch (modErr: unknown) {
+            const msg = modErr instanceof Error ? modErr.message : "Image rejected";
+            toast(msg, "error");
+            supabase.storage.from("listing_photos").remove([path]);
+            setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+            continue;
+          }
+
           setPhotos((prev) =>
             prev.map((p) =>
               p.id === photo.id
@@ -271,8 +281,10 @@ export default function SellPage() {
       setListing(result);
       setStep(3);
     } catch (err: unknown) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create listing");
-      setStep(3);
+      const msg = err instanceof Error ? err.message : "Failed to create listing";
+      const isModerationBlock = msg.toLowerCase().includes("flagged");
+      setSubmitError(msg);
+      if (!isModerationBlock) setStep(3);
     } finally {
       setSubmitting(false);
     }
@@ -448,6 +460,14 @@ export default function SellPage() {
       {/* ---- STEP 2: Item details ---- */}
       {step === 2 && (
         <div className="animate-fade-in">
+          {submitError && (
+            <div className="mb-4 flex items-center gap-2 border border-[var(--color-destructive)]/30 bg-[#FDECEC] px-3 py-2">
+              <AlertTriangle size={14} className="text-[var(--color-destructive)] shrink-0" />
+              <span className="text-xs text-[var(--color-destructive)]">
+                {submitError}
+              </span>
+            </div>
+          )}
           {aiLoading && (
             <div className="mb-4 flex items-center gap-2 border border-[var(--color-brand-muted)] bg-[var(--color-brand-subtle)] px-3 py-2">
               <Sparkles size={14} className="text-[var(--color-brand)]" />
