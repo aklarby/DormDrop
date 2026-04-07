@@ -6,20 +6,26 @@ from app.constants import CATEGORIES, CONDITIONS
 from app.dependencies import get_supabase
 
 
-SYSTEM_PROMPT = """You are a product listing assistant for DormDrop, a college student marketplace.
+SYSTEM_PROMPT = """You are a listing assistant for DormDrop, a college student marketplace.
 
-Analyze the item in the image carefully. Identify the brand, model, size, color, and any visible wear or damage.
+Look at the image and describe what you see accurately. Adapt your detail level to the type of item:
 
-Return a JSON object with these fields:
+- **Electronics/tech**: Include brand, model, and key specs (e.g. "Apple MacBook Pro 14\" M3 - Space Gray").
+- **Furniture/home goods**: Describe what it is, its style, material, color, and approximate dimensions (e.g. "Wooden Counter-Height Table with 2 Stools - Dark Walnut").
+- **Clothing/accessories**: Mention brand (if visible), type, size, color, and material (e.g. "Patagonia Better Sweater Quarter-Zip - Grey, Size M").
+- **Books/school supplies**: Include title, author/edition if visible (e.g. "Organic Chemistry 9th Edition - McMurry").
+- **Other items**: Just describe clearly what the item is, its notable features, and color.
 
-- "title": Brand + model + key attribute (e.g. "Apple MacBook Pro 14\" M3 - Space Gray"). Be specific — avoid generic titles like "Laptop" or "Apple MacBook Laptop".
-- "description": 3-4 sentences a buyer would actually find useful. Mention the brand/model, key specs or features, physical condition you can observe, and what makes it a good deal for a college student. Write in a natural, friendly tone — not robotic.
+Return a JSON object:
+
+- "title": A clear, descriptive title following the guidelines above. Never make up brands or models you can't see — just describe what's there.
+- "description": 2-3 sentences. Stick to factual details only: what the item is, its features, dimensions/size, material, color, and visible condition. Do NOT add sales pitches, suggestions for how to use it, or phrases like "great for..." or "perfect for...". Just describe the product.
 - "category": MUST be one of: {categories}
 - "condition": MUST be one of: {conditions} — judge from visible wear in the image.
-- "price_cents": Estimated fair resale price in cents (USD) for a college student marketplace. Factor in typical used pricing for this item.
-- "is_negotiable": true if the item is commonly negotiated on (electronics, furniture), false for low-cost items.
+- "price_cents": Estimated fair resale price in cents (USD) for a college student marketplace.
+- "is_negotiable": true for higher-value items (electronics, furniture), false for low-cost items.
 
-Return ONLY valid JSON. No markdown fences, no explanation outside the JSON.""".format(
+Return ONLY valid JSON. No markdown, no explanation.""".format(
     categories=", ".join(CATEGORIES),
     conditions=", ".join(CONDITIONS),
 )
@@ -51,7 +57,7 @@ async def auto_populate_from_image(storage_path: str) -> dict:
                 "role": "user",
                 "content": [
                     {"type": "image_url", "image_url": {"url": signed_url}},
-                    {"type": "text", "text": "Identify this item precisely (brand, model, specs) and generate a compelling listing for a college student marketplace. Be specific in the title and helpful in the description."},
+                    {"type": "text", "text": "What is this item? Describe it accurately and generate a listing. Only mention brand/model/specs if you can actually see them — otherwise just describe what the item is."},
                 ],
             },
         ],
