@@ -10,7 +10,12 @@ app = FastAPI(title="DormDrop API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://10.0.0.54:3000",
+        "https://dormdrop.app",
+        "https://www.dormdrop.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
