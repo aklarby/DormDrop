@@ -390,9 +390,16 @@ export default function ListingDetailPage() {
                     {listing.students.display_name}
                   </p>
                   {listing.students.venmo_handle && (
-                    <p className="text-xs text-[var(--color-muted)]">
-                      Venmo: @{listing.students.venmo_handle}
-                    </p>
+                    <a
+                      href={`https://venmo.com/u/${listing.students.venmo_handle}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:underline"
+                    >
+                      <Image src="/Venmo_logo.png" alt="Venmo" width={12} height={12} className="rounded-sm" />
+                      @{listing.students.venmo_handle}
+                    </a>
                   )}
                 </div>
               </Link>

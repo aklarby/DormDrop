@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { Calendar, AtSign } from "lucide-react";
+import Image from "next/image";
+import { Calendar } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/api";
 import { getSupabaseImageUrl } from "@/lib/utils";
@@ -112,10 +113,15 @@ export default function ProfilePage() {
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
             {student.venmo_handle && (
-              <span className="flex items-center gap-1 text-xs text-[var(--color-muted)]">
-                <AtSign className="w-3 h-3" />
-                {student.venmo_handle}
-              </span>
+              <a
+                href={`https://venmo.com/u/${student.venmo_handle}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:underline"
+              >
+                <Image src="/Venmo_logo.png" alt="Venmo" width={12} height={12} className="rounded-sm" />
+                @{student.venmo_handle}
+              </a>
             )}
             <span className="flex items-center gap-1 text-xs text-[var(--color-muted)]">
               <Calendar className="w-3 h-3" />

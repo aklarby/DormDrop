@@ -420,7 +420,16 @@ function MessagesContent() {
                 <p className="truncate text-xs text-[var(--color-muted)]">
                   {active.listing.title}
                   {active.other_user.venmo_handle && (
-                    <span> &middot; Venmo: {active.other_user.venmo_handle}</span>
+                    <> &middot; <a
+                      href={`https://venmo.com/u/${active.other_user.venmo_handle}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 hover:text-[var(--color-primary)] hover:underline"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src="/Venmo_logo.png" alt="Venmo" width={10} height={10} className="rounded-sm inline" />
+                      @{active.other_user.venmo_handle}
+                    </a></>
                   )}
                 </p>
               </div>
