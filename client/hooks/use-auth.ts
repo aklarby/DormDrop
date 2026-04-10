@@ -28,45 +28,23 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = useCallback(
-    async (email: string, password: string) => {
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) throw error;
-      return data;
-    },
-    [supabase]
-  );
-
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      return data;
-    },
-    [supabase]
-  );
-
-  const resetPasswordForEmail = useCallback(
+  const signInWithOtp = useCallback(
     async (email: string) => {
-      const siteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
-      });
+      const { error } = await supabase.auth.signInWithOtp({ email });
       if (error) throw error;
     },
     [supabase]
   );
 
-  const updatePassword = useCallback(
-    async (newPassword: string) => {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
+  const verifyOtp = useCallback(
+    async (email: string, token: string) => {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token,
+        type: "email",
       });
       if (error) throw error;
+      return data;
     },
     [supabase]
   );
@@ -75,5 +53,5 @@ export function useAuth() {
     await supabase.auth.signOut();
   }, [supabase]);
 
-  return { user, session, loading, signUp, signIn, signOut, resetPasswordForEmail, updatePassword };
+  return { user, session, loading, signInWithOtp, verifyOtp, signOut };
 }
