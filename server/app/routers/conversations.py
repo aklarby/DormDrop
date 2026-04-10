@@ -44,7 +44,7 @@ async def create_conversation(
         .maybe_single()
         .execute()
     )
-    if existing.data:
+    if existing and existing.data:
         return existing.data
 
     result = supabase.table("conversations").insert({
