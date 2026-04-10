@@ -106,8 +106,7 @@ The API runs at `http://localhost:8000`.
 
 ## Live App URL
 
-<!-- Replace with your deployed URL -->
-[DormDrop on Vercel](https://your-deployed-url.vercel.app)
+[dormdrop.app](https://dormdrop.app)
 
 ## Design Documentation
 
