@@ -49,9 +49,29 @@ export function useAuth() {
     [supabase]
   );
 
+  const resetPasswordForEmail = useCallback(
+    async (email: string) => {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      });
+      if (error) throw error;
+    },
+    [supabase]
+  );
+
+  const updatePassword = useCallback(
+    async (newPassword: string) => {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) throw error;
+    },
+    [supabase]
+  );
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
   }, [supabase]);
 
-  return { user, session, loading, signUp, signIn, signOut };
+  return { user, session, loading, signUp, signIn, signOut, resetPasswordForEmail, updatePassword };
 }

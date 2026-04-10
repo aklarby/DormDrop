@@ -2,45 +2,49 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
-import { api } from "@/lib/api";
 
-export default function LoginPage() {
+export default function ResetPasswordPage() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { updatePassword, loading: authLoading } = useAuth();
 
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords don\u2019t match.");
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      const { session } = await signIn(email, password);
-      const token = session?.access_token;
-
-      if (token) {
-        try {
-          await api.get("/students/me", token);
-        } catch {
-          const pendingName = localStorage.getItem("dormdrop_pending_display_name");
-          const displayName = pendingName || email.split("@")[0];
-          await api.post("/auth/complete-signup", { display_name: displayName }, token);
-          localStorage.removeItem("dormdrop_pending_display_name");
-        }
-      }
-
+      await updatePassword(password);
       router.push("/browse");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign in failed");
+      setError(err instanceof Error ? err.message : "Failed to update password");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (authLoading) {
+    return (
+      <div className="w-full max-w-[360px]">
+        <p className="text-sm text-[var(--color-secondary)]">Loading&hellip;</p>
+      </div>
+    );
   }
 
   return (
@@ -50,45 +54,45 @@ export default function LoginPage() {
           DormDrop
         </h1>
         <p className="mt-1 text-sm text-[var(--color-secondary)]">
-          Sign in to your account
+          Choose a new password
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
           <label
-            htmlFor="email"
+            htmlFor="password"
             className="block text-xs font-medium text-[var(--color-secondary)] mb-1.5"
           >
-            Email
+            New password
           </label>
           <input
-            id="email"
-            type="email"
+            id="password"
+            type="password"
             required
-            autoComplete="email"
             autoFocus
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@university.edu"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 8 characters"
             className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 text-sm text-[var(--color-primary)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
           />
         </div>
 
         <div>
           <label
-            htmlFor="password"
+            htmlFor="confirmPassword"
             className="block text-xs font-medium text-[var(--color-secondary)] mb-1.5"
           >
-            Password
+            Confirm password
           </label>
           <input
-            id="password"
+            id="confirmPassword"
             type="password"
             required
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
             className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 text-sm text-[var(--color-primary)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
           />
         </div>
@@ -102,28 +106,9 @@ export default function LoginPage() {
           disabled={submitting}
           className="h-10 w-full bg-[var(--color-primary)] text-white text-sm font-normal transition-colors duration-200 hover:bg-[var(--color-primary-hover)] disabled:opacity-50 disabled:pointer-events-none"
         >
-          {submitting ? "Signing in\u2026" : "Sign in"}
+          {submitting ? "Updating\u2026" : "Update password"}
         </button>
       </form>
-
-      <div className="mt-3 text-center">
-        <Link
-          href="/forgot-password"
-          className="text-xs text-[var(--color-secondary)] hover:text-[var(--color-brand)] transition-colors duration-200"
-        >
-          Forgot your password?
-        </Link>
-      </div>
-
-      <p className="mt-5 text-center text-xs text-[var(--color-secondary)]">
-        No account?{" "}
-        <Link
-          href="/signup"
-          className="text-[var(--color-brand)] hover:underline"
-        >
-          Create one
-        </Link>
-      </p>
     </div>
   );
 }
