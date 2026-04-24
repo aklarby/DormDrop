@@ -28,6 +28,16 @@ async def expire_listings(
     return {"success": True, "data": result.data}
 
 
+@router.post("/release-reservations")
+async def release_reservations(
+    x_internal_secret: str | None = Header(None),
+):
+    _require_internal_secret(x_internal_secret)
+    supabase = get_supabase()
+    result = supabase.rpc("release_stale_reservations").execute()
+    return {"success": True, "released": result.data}
+
+
 @router.post("/sweep-orphan-photos")
 async def sweep_orphan_photos(
     x_internal_secret: str | None = Header(None),

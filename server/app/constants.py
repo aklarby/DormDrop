@@ -14,8 +14,8 @@ ListingStatuses = Literal['active', 'sold', 'reserved', 'expired', 'removed']
 CONVERSATION_STATUSES = ["open", "closed"]
 ConversationStatuses = Literal['open', 'closed']
 
-REPORT_TARGET_TYPES = ["listing", "student", "message"]
-ReportTargetTypes = Literal['listing', 'student', 'message']
+REPORT_TARGET_TYPES = ["listing", "student", "message", "transaction"]
+ReportTargetTypes = Literal['listing', 'student', 'message', 'transaction']
 
 CATEGORY_LABELS: dict[str, str] = {
     "furniture": "Furniture",

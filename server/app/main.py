@@ -14,10 +14,13 @@ from app.routers import (
     conversations,
     internal,
     listings,
+    offers,
     reports,
+    reviews,
     saved,
     saved_searches,
     students,
+    transactions,
 )
 
 settings = get_settings()
@@ -57,6 +60,9 @@ app.include_router(reports.router, prefix="/reports", tags=["reports"])
 app.include_router(saved.router, prefix="/saved", tags=["saved"])
 app.include_router(saved_searches.router, prefix="/saved-searches", tags=["saved_searches"])
 app.include_router(blocks.router, prefix="/blocks", tags=["blocks"])
+app.include_router(offers.router, prefix="/offers", tags=["offers"])
+app.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
+app.include_router(reviews.router, prefix="/reviews", tags=["reviews"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
 
