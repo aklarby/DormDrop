@@ -1,0 +1,62 @@
+services:
+  - type: web
+    name: dormdrop-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://dormdrop.app,https://www.dormdrop.app
+
+  - type: cron
+    name: expire-stale-listings
+    env: python
+    buildCommand: pip install requests
+    schedule: "0 3 * * *"
+    command: >-
+      python -c "import os,requests;
+      requests.post(os.environ['API_URL']+'/internal/expire-listings',
+                    headers={'X-Internal-Secret': os.environ['INTERNAL_SECRET']})"
+    envVars:
+      - key: API_URL
+        value: https://api.dormdrop.app
+      - key: INTERNAL_SECRET
+        sync: false
+
+  - type: cron
+    name: release-reservations
+    env: python
+    buildCommand: pip install requests
+    schedule: "*/15 * * * *"
+    command: >-
+      python -c "import os,requests;
+      requests.post(os.environ['API_URL']+'/internal/release-reservations',
+                    headers={'X-Internal-Secret': os.environ['INTERNAL_SECRET']})"
+    envVars:
+      - key: API_URL
+        value: https://api.dormdrop.app
+      - key: INTERNAL_SECRET
+        sync: false
+
+  - type: cron
+    name: sweep-orphan-photos
+    env: python
+    buildCommand: pip install requests
+    schedule: "0 4 * * *"
+    command: >-
+      python -c "import os,requests;
+      requests.post(os.environ['API_URL']+'/internal/sweep-orphan-photos',
+                    headers={'X-Internal-Secret': os.environ['INTERNAL_SECRET']})"
+    envVars:
+      - key: API_URL
+        value: https://api.dormdrop.app
+      - key: INTERNAL_SECRET
+        sync: false
