@@ -16,6 +16,7 @@ from app.routers import (
     listings,
     reports,
     saved,
+    saved_searches,
     students,
 )
 
@@ -54,6 +55,7 @@ app.include_router(conversations.router, prefix="/conversations", tags=["convers
 app.include_router(students.router, prefix="/students", tags=["students"])
 app.include_router(reports.router, prefix="/reports", tags=["reports"])
 app.include_router(saved.router, prefix="/saved", tags=["saved"])
+app.include_router(saved_searches.router, prefix="/saved-searches", tags=["saved_searches"])
 app.include_router(blocks.router, prefix="/blocks", tags=["blocks"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])

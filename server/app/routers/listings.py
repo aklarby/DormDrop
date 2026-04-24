@@ -54,50 +54,78 @@ async def list_listings(
     cursor: str | None = None,
     limit: int = Query(default=20, le=50),
 ):
+    """Hybrid search: delegates to the listings_search RPC which combines
+    tsvector ranking with pg_trgm similarity for typo tolerance. Also
+    filters blocked sellers and deactivated sellers at the RPC level."""
     supabase = get_supabase()
-    query = (
-        supabase.table("listings")
-        .select("*, students!seller_id(display_name, pfp_path, is_active)")
-        .eq("college_id", current_user.college_id)
-        .eq("status", "active")
-    )
 
-    if search:
-        query = query.text_search("search_vector", search, config="english")
-    if category:
-        cats = [c.strip() for c in category.split(",")]
-        query = query.in_("category", cats)
-    if condition:
-        query = query.eq("condition", condition)
-    if min_price is not None:
-        query = query.gte("price_cents", min_price)
-    if max_price is not None:
-        query = query.lte("price_cents", max_price)
+    categories = [c.strip() for c in category.split(",")] if category else None
 
-    if sort == "price_asc":
-        query = query.order("price_cents", desc=False)
-    elif sort == "price_desc":
-        query = query.order("price_cents", desc=True)
-    elif sort == "ending_soon":
-        query = query.order("expires_at", desc=False)
-    else:
-        query = query.order("created_at", desc=True)
+    result = supabase.rpc(
+        "listings_search",
+        {
+            "p_college_id": current_user.college_id,
+            "p_query": search,
+            "p_categories": categories,
+            "p_condition": condition,
+            "p_min_price": min_price,
+            "p_max_price": max_price,
+            "p_sort": sort,
+            "p_cursor": cursor,
+            "p_limit": limit,
+            "p_viewer_id": current_user.id,
+        },
+    ).execute()
 
-    if cursor:
-        query = query.lt("created_at", cursor)
+    rows = []
+    for r in (result.data or []):
+        r["students"] = {
+            "display_name": r.pop("seller_display_name", None),
+            "pfp_path": r.pop("seller_pfp_path", None),
+        }
+        r.pop("relevance", None)
+        rows.append(r)
 
-    query = query.limit(limit)
-    result = query.execute()
-
-    # Hide listings from deactivated sellers (defense-in-depth; RLS also enforces this).
-    rows = [
-        row for row in (result.data or [])
-        if not (
-            isinstance(row.get("students"), dict)
-            and row["students"].get("is_active") is False
-        )
-    ]
     return {"data": rows, "count": len(rows)}
+
+
+@router.get("/suggest")
+async def suggest_listings(
+    q: str = Query(..., min_length=1, max_length=40),
+    current_user: CurrentUser = Depends(require_college_member),
+):
+    supabase = get_supabase()
+    result = supabase.rpc(
+        "listings_suggest",
+        {"p_college_id": current_user.college_id, "p_query": q, "p_limit": 8},
+    ).execute()
+    return {"data": result.data or []}
+
+
+@router.get("/facets")
+async def listing_facets(
+    current_user: CurrentUser = Depends(require_college_member),
+    search: str | None = None,
+    category: str | None = None,
+    condition: str | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
+):
+    supabase = get_supabase()
+    categories = [c.strip() for c in category.split(",")] if category else None
+    result = supabase.rpc(
+        "listings_facets",
+        {
+            "p_college_id": current_user.college_id,
+            "p_query": search,
+            "p_categories": categories,
+            "p_condition": condition,
+            "p_min_price": min_price,
+            "p_max_price": max_price,
+            "p_viewer_id": current_user.id,
+        },
+    ).execute()
+    return {"data": result.data or []}
 
 
 @router.get("/{listing_id}")
