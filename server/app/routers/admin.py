@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -11,6 +12,18 @@ from app.middleware.auth import CurrentUser, require_admin
 from app.services.storage import delete_files, extract_photo_paths
 
 router = APIRouter()
+
+
+def _audit(actor_id: str, action: str, target_type: str | None = None,
+           target_id: str | None = None, metadata: dict[str, Any] | None = None) -> None:
+    supabase = get_supabase()
+    supabase.table("audit_events").insert({
+        "actor_id": actor_id,
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "metadata": metadata,
+    }).execute()
 
 
 RESOLUTION_ACTIONS = {"dismiss", "remove_listing", "ban_user", "warn"}
@@ -78,7 +91,67 @@ async def admin_remove_listing(
     paths = extract_photo_paths(existing.data.get("photos"))
     if paths:
         delete_files("listing_photos", paths)
+
+    _audit(current_user.id, "admin.remove_listing", "listing", listing_id)
     return {"success": True}
+
+
+@router.get("/listings")
+async def admin_list_listings(
+    current_user: CurrentUser = Depends(require_admin),
+    q: str | None = None,
+    status: str | None = None,
+    limit: int = Query(default=30, le=100),
+):
+    supabase = get_supabase()
+    query = (
+        supabase.table("listings")
+        .select("id, title, price_cents, status, seller_id, created_at, students!seller_id(display_name)")
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if status:
+        query = query.eq("status", status)
+    if q:
+        query = query.ilike("title", f"%{q}%")
+    return {"data": query.execute().data}
+
+
+@router.get("/users")
+async def admin_list_users(
+    current_user: CurrentUser = Depends(require_admin),
+    q: str | None = None,
+    include_inactive: bool = True,
+    limit: int = Query(default=30, le=100),
+):
+    supabase = get_supabase()
+    query = (
+        supabase.table("students")
+        .select("id, display_name, is_active, role, created_at, bio")
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if not include_inactive:
+        query = query.eq("is_active", True)
+    if q:
+        query = query.ilike("display_name", f"%{q}%")
+    return {"data": query.execute().data}
+
+
+@router.get("/audit")
+async def admin_audit(
+    current_user: CurrentUser = Depends(require_admin),
+    limit: int = Query(default=50, le=200),
+):
+    supabase = get_supabase()
+    result = (
+        supabase.table("audit_events")
+        .select("*, actor:students!actor_id(id, display_name)")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return {"data": result.data}
 
 
 class BanRequest(BaseModel):
@@ -95,6 +168,7 @@ async def ban_user(
         raise HTTPException(status_code=400, detail="Cannot ban yourself")
     supabase = get_supabase()
     supabase.table("students").update({"is_active": False}).eq("id", user_id).execute()
+    _audit(current_user.id, "admin.ban_user", "student", user_id, {"reason": body.reason})
     return {"success": True}
 
 
@@ -105,6 +179,7 @@ async def unban_user(
 ):
     supabase = get_supabase()
     supabase.table("students").update({"is_active": True}).eq("id", user_id).execute()
+    _audit(current_user.id, "admin.unban_user", "student", user_id)
     return {"success": True}
 
 
