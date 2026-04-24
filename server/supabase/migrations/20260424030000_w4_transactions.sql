@@ -160,7 +160,9 @@ ALTER TABLE reports
 -- =============================================================================
 -- 6. Average rating view
 -- =============================================================================
-CREATE OR REPLACE VIEW student_review_stats AS
+CREATE OR REPLACE VIEW student_review_stats
+  WITH (security_invoker = on)
+  AS
   SELECT reviewee_id AS student_id,
          AVG(rating)::numeric(3,2) AS avg_rating,
          COUNT(*)::integer AS review_count

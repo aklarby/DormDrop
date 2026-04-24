@@ -407,41 +407,40 @@ export default function ListingDetailPage() {
           {/* ── Seller ── */}
           {listing.students && (
             <div className="border-t border-[var(--color-border-subtle)] pt-4">
-              <Link
-                href={`/profile/${listing.students.id}`}
-                className="flex items-center gap-2.5 group"
-              >
-                <Avatar
-                  src={
-                    listing.students.pfp_path
-                      ? getSupabaseImageUrl(
-                          "profile_pictures",
-                          listing.students.pfp_path
-                        )
-                      : null
-                  }
-                  alt={listing.students.display_name}
-                  fallback={listing.students.display_name?.[0]}
-                  size="md"
-                />
-                <div>
+              <div className="flex items-center gap-2.5">
+                <Link
+                  href={`/profile/${listing.students.id}`}
+                  className="group flex items-center gap-2.5"
+                >
+                  <Avatar
+                    src={
+                      listing.students.pfp_path
+                        ? getSupabaseImageUrl(
+                            "profile_pictures",
+                            listing.students.pfp_path
+                          )
+                        : null
+                    }
+                    alt={listing.students.display_name}
+                    fallback={listing.students.display_name?.[0]}
+                    size="md"
+                  />
                   <p className="text-sm font-medium text-[var(--color-primary)] group-hover:underline">
                     {listing.students.display_name}
                   </p>
-                  {listing.students.venmo_handle && (
-                    <a
-                      href={`https://venmo.com/u/${listing.students.venmo_handle}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:underline"
-                    >
-                      <Image src="/Venmo_logo.png" alt="Venmo" width={12} height={12} className="rounded-sm" />
-                      @{listing.students.venmo_handle}
-                    </a>
-                  )}
-                </div>
-              </Link>
+                </Link>
+                {listing.students.venmo_handle && (
+                  <a
+                    href={`https://venmo.com/u/${listing.students.venmo_handle}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:underline"
+                  >
+                    <Image src="/Venmo_logo.png" alt="Venmo" width={12} height={12} className="rounded-sm" />
+                    @{listing.students.venmo_handle}
+                  </a>
+                )}
+              </div>
             </div>
           )}
 

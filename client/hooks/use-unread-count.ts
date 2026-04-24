@@ -63,7 +63,13 @@ export function useUnreadCount(): number {
     const uid = user?.id;
     if (!uid) return;
 
-    const channel = supabase.channel(`unread:${uid}`);
+    // supabase-js caches channels by name. Under React StrictMode (and during
+    // fast refresh), the cleanup's removeChannel can race the next mount,
+    // leaving a subscribed channel in the registry. Calling .on() on an
+    // already-subscribed channel throws. A fresh per-mount name avoids the
+    // collision entirely.
+    const channelName = `unread:${uid}:${Math.random().toString(36).slice(2)}`;
+    const channel = supabase.channel(channelName);
     channel
       .on(
         "postgres_changes",
@@ -71,8 +77,6 @@ export function useUnreadCount(): number {
         (payload) => {
           const row = payload.new as { sender_id?: string } | null;
           if (!row || row.sender_id === uid) return;
-          // The server is authoritative; re-fetch to avoid double-counting
-          // messages already read in another tab.
           refreshRef.current();
         }
       )
