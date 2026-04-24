@@ -1,14 +1,19 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
+
 from app.dependencies import get_supabase
-from app.middleware.auth import CurrentUser, get_current_user
+from app.middleware.auth import CurrentUser, get_current_user, require_college_member
 from app.constants import CATEGORIES, CONDITIONS, LISTING_STATUSES
 from app.services.ai_populate import auto_populate_from_image
 from app.services.moderation import moderate_image, moderate_text
-from app.services.storage import move_from_staging, delete_file
+from app.services.storage import delete_files, extract_photo_paths
 
 router = APIRouter()
+
+STATUSES_THAT_REMOVE_PHOTOS = {"removed", "expired"}
 
 
 class PhotoEntry(BaseModel):
@@ -38,7 +43,7 @@ class UpdateListingRequest(BaseModel):
 
 @router.get("")
 async def list_listings(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_college_member),
     search: str | None = None,
     category: str | None = None,
     condition: str | None = None,
@@ -48,13 +53,10 @@ async def list_listings(
     cursor: str | None = None,
     limit: int = Query(default=20, le=50),
 ):
-    if not current_user.college_id:
-        raise HTTPException(status_code=403, detail="Complete your profile first")
-
     supabase = get_supabase()
     query = (
         supabase.table("listings")
-        .select("*, students!seller_id(display_name, pfp_path)")
+        .select("*, students!seller_id(display_name, pfp_path, is_active)")
         .eq("college_id", current_user.college_id)
         .eq("status", "active")
     )
@@ -75,6 +77,8 @@ async def list_listings(
         query = query.order("price_cents", desc=False)
     elif sort == "price_desc":
         query = query.order("price_cents", desc=True)
+    elif sort == "ending_soon":
+        query = query.order("expires_at", desc=False)
     else:
         query = query.order("created_at", desc=True)
 
@@ -83,7 +87,16 @@ async def list_listings(
 
     query = query.limit(limit)
     result = query.execute()
-    return {"data": result.data, "count": len(result.data)}
+
+    # Hide listings from deactivated sellers (defense-in-depth; RLS also enforces this).
+    rows = [
+        row for row in (result.data or [])
+        if not (
+            isinstance(row.get("students"), dict)
+            and row["students"].get("is_active") is False
+        )
+    ]
+    return {"data": rows, "count": len(rows)}
 
 
 @router.get("/{listing_id}")
@@ -94,7 +107,7 @@ async def get_listing(
     supabase = get_supabase()
     result = (
         supabase.table("listings")
-        .select("*, students!seller_id(id, display_name, pfp_path, venmo_handle)")
+        .select("*, students!seller_id(id, display_name, pfp_path, venmo_handle, is_active)")
         .eq("id", listing_id)
         .single()
         .execute()
@@ -106,17 +119,20 @@ async def get_listing(
     if current_user.college_id and result.data["college_id"] != current_user.college_id:
         raise HTTPException(status_code=403, detail="Not authorized to view this listing")
 
+    seller = result.data.get("students") or {}
+    if isinstance(seller, list):
+        seller = seller[0] if seller else {}
+    if seller and seller.get("is_active") is False and result.data["seller_id"] != current_user.id:
+        raise HTTPException(status_code=404, detail="Listing not found")
+
     return result.data
 
 
 @router.post("")
 async def create_listing(
     body: CreateListingRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_college_member),
 ):
-    if not current_user.college_id:
-        raise HTTPException(status_code=403, detail="Complete your profile first")
-
     if body.category not in CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category: {body.category}")
     if body.condition not in CONDITIONS:
@@ -134,10 +150,16 @@ async def create_listing(
             detail=f"Your listing text was flagged for: {flagged}. Please revise and try again.",
         )
 
-    for photo in body.photos:
-        img_mod = await moderate_image(photo.path)
-        if img_mod["flagged"]:
-            flagged = ", ".join(img_mod["categories"].keys())
+    # Parallel image moderation — 8 photos used to be 8 sequential OpenAI calls.
+    mod_results = await asyncio.gather(
+        *[moderate_image(photo.path) for photo in body.photos],
+        return_exceptions=True,
+    )
+    for photo, mod in zip(body.photos, mod_results):
+        if isinstance(mod, Exception):
+            raise HTTPException(status_code=502, detail=f"Image moderation failed: {mod}")
+        if mod.get("flagged"):
+            flagged = ", ".join(mod["categories"].keys())
             raise HTTPException(
                 status_code=422,
                 detail=f"A photo was flagged for: {flagged}. Please remove it and try again.",
@@ -172,7 +194,7 @@ async def update_listing(
 
     existing = (
         supabase.table("listings")
-        .select("seller_id")
+        .select("seller_id, photos, status")
         .eq("id", listing_id)
         .single()
         .execute()
@@ -191,7 +213,31 @@ async def update_listing(
     if "status" in updates and updates["status"] not in LISTING_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status")
 
+    # Re-moderate text edits.
+    if "title" in updates or "description" in updates:
+        text_blob = f"{updates.get('title', '')}\n{updates.get('description', '')}"
+        mod = await moderate_text(text_blob)
+        if mod["flagged"]:
+            flagged = ", ".join(mod["categories"].keys())
+            raise HTTPException(
+                status_code=422,
+                detail=f"Edit was flagged for: {flagged}. Please revise.",
+            )
+
     result = supabase.table("listings").update(updates).eq("id", listing_id).execute()
+
+    # Photo lifecycle: if the listing transitioned to a terminal status,
+    # drop the photos from storage so we don't keep private content around.
+    new_status = updates.get("status")
+    prev_status = existing.data.get("status")
+    if (
+        new_status in STATUSES_THAT_REMOVE_PHOTOS
+        and prev_status not in STATUSES_THAT_REMOVE_PHOTOS
+    ):
+        paths = extract_photo_paths(existing.data.get("photos"))
+        if paths:
+            delete_files("listing_photos", paths)
+
     return result.data[0]
 
 
@@ -270,7 +316,7 @@ async def remove_listing(
 
     existing = (
         supabase.table("listings")
-        .select("seller_id")
+        .select("seller_id, photos")
         .eq("id", listing_id)
         .single()
         .execute()
@@ -281,4 +327,10 @@ async def remove_listing(
         raise HTTPException(status_code=403, detail="Not your listing")
 
     supabase.table("listings").update({"status": "removed"}).eq("id", listing_id).execute()
+
+    # Drop storage objects so removed listings don't keep photos around.
+    paths = extract_photo_paths(existing.data.get("photos"))
+    if paths:
+        delete_files("listing_photos", paths)
+
     return {"success": True}
