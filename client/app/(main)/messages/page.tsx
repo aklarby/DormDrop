@@ -9,7 +9,20 @@ import {
   Suspense,
 } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Send, MessageSquare, HandCoins, Check, X } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  Send,
+  MessageSquare,
+  HandCoins,
+  Check,
+  X,
+  Ban,
+  Flag,
+  MoreVertical,
+  User as UserIcon,
+  Archive,
+} from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/hooks/use-auth";
@@ -290,7 +303,11 @@ function MessagesContent() {
             type: raw.type,
             metadata: raw.metadata ?? null,
           };
-          if (msg.sender_id === user.id) return;
+          // Skip our own text/image messages — those are already in state
+          // via the optimistic send path. System messages (offer accepted,
+          // withdrawn, etc.) must fall through even when we sent them,
+          // otherwise the card never flips until a refresh.
+          if (msg.sender_id === user.id && msg.type !== "system") return;
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
             return [...prev, msg];
@@ -421,14 +438,119 @@ function MessagesContent() {
   }, [messages]);
 
   const [offerActing, setOfferActing] = useState<string | null>(null);
+  const [threadMenuOpen, setThreadMenuOpen] = useState(false);
+  const threadMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!threadMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        threadMenuRef.current &&
+        !threadMenuRef.current.contains(e.target as Node)
+      )
+        setThreadMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [threadMenuOpen]);
+
+  const blockOtherUser = async () => {
+    if (!token || !active) return;
+    if (
+      !window.confirm(
+        `Block ${active.other_user.display_name}? You won't see their listings or messages anymore.`
+      )
+    )
+      return;
+    try {
+      await api.post(
+        "/blocks",
+        { blocked_id: active.other_user.id },
+        token
+      );
+      toast("User blocked", "success");
+      setThreadMenuOpen(false);
+      // Drop them from the conversations list locally.
+      setConversations((prev) => prev.filter((c) => c.id !== active.id));
+      setActiveId(null);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to block", "error");
+    }
+  };
+
+  const reportOtherUser = async () => {
+    if (!token || !active) return;
+    const reason = window.prompt(
+      `Why are you reporting ${active.other_user.display_name}?`
+    );
+    if (!reason?.trim()) return;
+    try {
+      await api.post(
+        "/reports",
+        {
+          target_type: "student",
+          target_id: active.other_user.id,
+          reason: reason.trim(),
+        },
+        token
+      );
+      toast("Report submitted", "success");
+      setThreadMenuOpen(false);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to report", "error");
+    }
+  };
+
+  const archiveThread = async () => {
+    if (!token || !active) return;
+    try {
+      await api.patch(`/conversations/${active.id}/archive`, { archived: true }, token);
+      setConversations((prev) => prev.filter((c) => c.id !== active.id));
+      setActiveId(null);
+      toast("Conversation archived", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to archive", "error");
+    }
+  };
 
   const actOnOffer = async (offerId: string, action: "accepted" | "declined" | "withdrawn") => {
-    if (!token) return;
+    if (!token || !activeId) return;
     setOfferActing(offerId);
     try {
       await api.patch(`/offers/${offerId}`, { status: action }, token);
-      // The server drops a kind='offer_update' system message, which flows
-      // back in via realtime and flips the card state through offerStatusById.
+      // Optimistic local update so the seller doesn't have to wait for the
+      // realtime round-trip of their own action.
+      const now = new Date().toISOString();
+      setMessages((prev) => {
+        // Find the amount from the original kind='offer' system message so
+        // the offer_update chip can show "Offer accepted — $50.00".
+        const originalAmount = (() => {
+          for (const m of prev) {
+            const md = m.metadata as { kind?: string; offer_id?: string; amount_cents?: number } | null | undefined;
+            if (md?.kind === "offer" && md.offer_id === offerId) return md.amount_cents ?? null;
+          }
+          return null;
+        })();
+        const syntheticId = `local-offer-update-${offerId}-${action}`;
+        if (prev.some((m) => m.id === syntheticId)) return prev;
+        return [
+          ...prev,
+          {
+            id: syntheticId,
+            conversation_id: activeId,
+            sender_id: user?.id ?? "",
+            body: `Offer ${action}`,
+            created_at: now,
+            type: "system",
+            metadata: {
+              kind: "offer_update",
+              offer_id: offerId,
+              status: action,
+              amount_cents: originalAmount ?? 0,
+            },
+          },
+        ];
+      });
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed to update offer", "error");
     } finally {
@@ -702,6 +824,55 @@ function MessagesContent() {
                     </a></>
                   )}
                 </p>
+              </div>
+              <div ref={threadMenuRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  aria-label="Conversation options"
+                  onClick={() => setThreadMenuOpen((o) => !o)}
+                  className="p-1.5 text-[var(--color-secondary)] hover:text-[var(--color-primary)]"
+                >
+                  <MoreVertical size={16} />
+                </button>
+                {threadMenuOpen && (
+                  <div
+                    role="menu"
+                    className="animate-scale-in absolute right-0 top-full z-30 mt-1 w-48 border border-[var(--color-border)] bg-[var(--color-surface-raised)] py-1 shadow-lg"
+                  >
+                    <Link
+                      href={`/profile/${active.other_user.id}`}
+                      onClick={() => setThreadMenuOpen(false)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-[var(--color-primary)] hover:bg-[var(--color-surface-sunken)]"
+                    >
+                      <UserIcon className="w-3 h-3" />
+                      View profile
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={archiveThread}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-primary)] hover:bg-[var(--color-surface-sunken)]"
+                    >
+                      <Archive className="w-3 h-3" />
+                      Archive
+                    </button>
+                    <button
+                      type="button"
+                      onClick={reportOtherUser}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-primary)] hover:bg-[var(--color-surface-sunken)]"
+                    >
+                      <Flag className="w-3 h-3" />
+                      Report user
+                    </button>
+                    <button
+                      type="button"
+                      onClick={blockOtherUser}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-destructive)] hover:bg-[var(--color-surface-sunken)]"
+                    >
+                      <Ban className="w-3 h-3" />
+                      Block user
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

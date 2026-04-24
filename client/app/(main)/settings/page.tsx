@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Camera, LogOut, Check } from "lucide-react";
+import Link from "next/link";
+import { Camera, LogOut, Check, Pencil } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/api";
 import { getSupabaseImageUrl, formatPriceShort, cn } from "@/lib/utils";
@@ -362,18 +363,51 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  {isActive && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={actionLoading === listing.id}
-                        onClick={() =>
-                          handleListingAction(listing.id, "sold")
-                        }
-                      >
-                        Sold
-                      </Button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Link
+                      href={`/listing/${listing.id}/edit`}
+                      aria-label={`Edit ${listing.title}`}
+                      className="inline-flex h-7 items-center gap-1 border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 text-xs text-[var(--color-secondary)] hover:text-[var(--color-primary)]"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Edit
+                    </Link>
+                    {isActive && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={actionLoading === listing.id}
+                          onClick={() =>
+                            handleListingAction(listing.id, "sold")
+                          }
+                        >
+                          Sold
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={actionLoading === listing.id}
+                          onClick={() =>
+                            handleListingAction(listing.id, "extend")
+                          }
+                        >
+                          Extend
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={actionLoading === listing.id}
+                          onClick={() =>
+                            handleListingAction(listing.id, "removed")
+                          }
+                          className="text-[var(--color-destructive)] hover:text-[var(--color-destructive)]"
+                        >
+                          Remove
+                        </Button>
+                      </>
+                    )}
+                    {!isActive && listing.status !== "active" && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -382,21 +416,10 @@ export default function SettingsPage() {
                           handleListingAction(listing.id, "extend")
                         }
                       >
-                        Extend
+                        Relist
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={actionLoading === listing.id}
-                        onClick={() =>
-                          handleListingAction(listing.id, "removed")
-                        }
-                        className="text-[var(--color-destructive)] hover:text-[var(--color-destructive)]"
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               );
             })}
