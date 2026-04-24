@@ -22,7 +22,9 @@ export function ProfileCompletenessBanner() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setDismissed(window.localStorage.getItem(DISMISS_KEY) === "1");
+    queueMicrotask(() =>
+      setDismissed(window.localStorage.getItem(DISMISS_KEY) === "1")
+    );
   }, []);
 
   useEffect(() => {

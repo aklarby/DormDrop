@@ -31,7 +31,7 @@ export function FirstLoginTour() {
     if (typeof window === "undefined") return;
     const seen = window.localStorage.getItem(TOUR_KEY);
     if (!seen) {
-      setOpen(true);
+      queueMicrotask(() => setOpen(true));
     }
   }, [loading, user]);
 

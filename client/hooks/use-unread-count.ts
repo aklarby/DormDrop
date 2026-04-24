@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -18,8 +18,16 @@ export function useUnreadCount(): number {
   const { user, session } = useAuth();
   const token = session?.access_token;
   const [count, setCount] = useState(0);
-  const supabase = createClient();
+
+  // supabase-js caches channels by name; if this hook rebuilds the client
+  // every render, StrictMode's double-mount tries to `.on()` a channel
+  // that was already `.subscribe()`d from the first mount and throws
+  // "cannot add postgres_changes callbacks ... after subscribe()".
+  // Memoize so the realtime effect only runs when user.id changes.
+  const supabase = useMemo(() => createClient(), []);
+
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshRef = useRef<() => void>(() => {});
 
   const refresh = useCallback(async () => {
     if (!token) {
@@ -34,10 +42,14 @@ export function useUnreadCount(): number {
     }
   }, [token]);
 
+  // Keep a stable ref so the realtime effect below doesn't need refresh
+  // in its deps array (which would re-subscribe on every token change).
   useEffect(() => {
-    // Defer the initial refresh so setState doesn't run synchronously
-    // inside the effect body.
-    const micro = queueMicrotask(() => refresh());
+    refreshRef.current = refresh;
+  }, [refresh]);
+
+  useEffect(() => {
+    queueMicrotask(() => refresh());
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     if (token) {
       pollTimerRef.current = setInterval(refresh, POLL_INTERVAL_MS);
@@ -45,23 +57,23 @@ export function useUnreadCount(): number {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-    void micro;
   }, [refresh, token]);
 
   useEffect(() => {
-    if (!user) return;
+    const uid = user?.id;
+    if (!uid) return;
 
-    const channel = supabase
-      .channel(`unread:${user.id}`)
+    const channel = supabase.channel(`unread:${uid}`);
+    channel
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
         (payload) => {
           const row = payload.new as { sender_id?: string } | null;
-          if (!row || row.sender_id === user.id) return;
+          if (!row || row.sender_id === uid) return;
           // The server is authoritative; re-fetch to avoid double-counting
           // messages already read in another tab.
-          refresh();
+          refreshRef.current();
         }
       )
       .subscribe();
@@ -69,7 +81,7 @@ export function useUnreadCount(): number {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, supabase, refresh]);
+  }, [user?.id, supabase]);
 
   return count;
 }

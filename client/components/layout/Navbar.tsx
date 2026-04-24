@@ -44,7 +44,7 @@ export function Navbar() {
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setRecent(readRecent());
+    queueMicrotask(() => setRecent(readRecent()));
   }, []);
 
   useEffect(() => {

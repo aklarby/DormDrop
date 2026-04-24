@@ -31,7 +31,7 @@ export default function AdminLayout({
   useEffect(() => {
     if (authLoading) return;
     if (!token) {
-      setAllowed(false);
+      queueMicrotask(() => setAllowed(false));
       return;
     }
     api
