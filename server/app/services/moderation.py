@@ -1,5 +1,6 @@
 from openai import OpenAI
 from app.config import get_settings
+from app.dependencies import get_supabase
 
 
 SCORE_THRESHOLDS = {
@@ -23,10 +24,13 @@ def get_openai_client() -> OpenAI:
     return OpenAI(api_key=get_settings().openai_api_key)
 
 
-def storage_path_to_public_url(path: str) -> str:
-    """Convert a storage path to its public URL."""
-    base = get_settings().supabase_url
-    return f"{base}/storage/v1/object/public/listing_photos/{path}"
+def storage_path_to_signed_url(path: str, bucket: str = "listing_photos", expires_in: int = 300) -> str:
+    """Short-lived signed URL for a private storage object (OpenAI moderation needs
+    a URL it can actually fetch — the listing_photos bucket is not public)."""
+    supabase = get_supabase()
+    result = supabase.storage.from_(bucket).create_signed_url(path, expires_in)
+    # supabase-py returns either {"signedURL": ...} or {"signed_url": ...}
+    return result.get("signedURL") or result.get("signed_url")
 
 
 def _check_scores(result) -> dict:
@@ -60,12 +64,15 @@ async def moderate_text(text: str) -> dict:
     return {"flagged": flagged, "categories": violated}
 
 
-async def moderate_image(storage_path: str) -> dict:
-    """Run a single image through OpenAI's moderation API with custom thresholds."""
-    client = get_openai_client()
-    url = storage_path_to_public_url(storage_path)
+async def moderate_image(storage_path: str, bucket: str = "listing_photos") -> dict:
+    """Run a single image through OpenAI's moderation API with custom thresholds.
 
-    print(f"[MODERATION] Checking image: {url}")
+    Uses a signed URL so this works against private buckets in production.
+    """
+    client = get_openai_client()
+    url = storage_path_to_signed_url(storage_path, bucket=bucket)
+
+    print(f"[MODERATION] Checking image: {storage_path} (signed URL)")
 
     response = client.moderations.create(
         model="omni-moderation-latest",

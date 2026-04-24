@@ -14,6 +14,8 @@ from app.dependencies import get_supabase
 class CurrentUser:
     id: str
     college_id: str | None = None
+    is_active: bool = True
+    role: str = "student"
 
 
 @lru_cache
@@ -52,9 +54,53 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     supabase = get_supabase()
-    result = supabase.table("students").select("college_id").eq("id", user_id).maybe_single().execute()
-    college_id = None
+    # role column is added by the W2 admin migration; tolerate older schemas.
+    try:
+        result = (
+            supabase.table("students")
+            .select("college_id, is_active, role")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception:
+        result = (
+            supabase.table("students")
+            .select("college_id, is_active")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+
+    college_id: str | None = None
+    is_active = True
+    role = "student"
     if result and result.data:
         college_id = result.data.get("college_id")
+        is_active = bool(result.data.get("is_active", True))
+        role = result.data.get("role", "student") or "student"
 
-    return CurrentUser(id=user_id, college_id=college_id)
+    if not is_active:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    return CurrentUser(id=user_id, college_id=college_id, is_active=is_active, role=role)
+
+
+def require_college_member(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Dependency: ensures the caller has completed signup and is at a college.
+
+    Replaces the scattered `if not current_user.college_id` checks across routers.
+    """
+    if not current_user.college_id:
+        raise HTTPException(status_code=403, detail="Complete your profile first")
+    return current_user
+
+
+def require_admin(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
