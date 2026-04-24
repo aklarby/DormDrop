@@ -12,6 +12,8 @@ import {
   Clock,
   Trash2,
   CheckCircle2,
+  Pencil,
+  HandCoins,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -37,9 +39,10 @@ type ListingDetail = {
   condition: string;
   category: string;
   status: string;
+  is_negotiable: boolean;
   photos: { order: number; path: string }[];
   created_at: string;
-  student_id: string;
+  seller_id: string;
   students: {
     id: string;
     display_name: string;
@@ -84,9 +87,13 @@ export default function ListingDetailPage() {
   const [reportReason, setReportReason] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
   const [similar, setSimilar] = useState<SimilarRow[]>([]);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerNote, setOfferNote] = useState("");
+  const [offerBusy, setOfferBusy] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const isOwner = user?.id === listing?.student_id;
+  const isOwner = user?.id === listing?.seller_id;
 
   useEffect(() => {
     if (!token) return;
@@ -101,7 +108,7 @@ export default function ListingDetailPage() {
   // Record a view (idempotent per viewer per day on the server).
   useEffect(() => {
     if (!token || !listing) return;
-    if (listing.student_id && user?.id === listing.student_id) return;
+    if (listing.seller_id && user?.id === listing.seller_id) return;
     api.post("/listings/views", { listing_id: listing.id }, token).catch(() => {});
 
     // Local "recently viewed" log (W7).
@@ -192,6 +199,39 @@ export default function ListingDetailPage() {
       router.push("/browse");
     } catch {
       setBusy(null);
+    }
+  };
+
+  const submitOffer = async () => {
+    if (!token || !listing) return;
+    const dollars = parseFloat(offerAmount);
+    if (!Number.isFinite(dollars) || dollars <= 0) return;
+    const amountCents = Math.round(dollars * 100);
+    setOfferBusy(true);
+    try {
+      // Make sure a conversation exists between buyer and seller for this listing.
+      const conv = await api.post<{ id: string }>(
+        "/conversations",
+        { listing_id: listing.id },
+        token
+      );
+      await api.post(
+        "/offers",
+        {
+          conversation_id: conv.id,
+          amount_cents: amountCents,
+          note: offerNote.trim() || null,
+        },
+        token
+      );
+      setOfferOpen(false);
+      setOfferAmount("");
+      setOfferNote("");
+      router.push(`/messages?conversation=${conv.id}`);
+    } catch {
+      /* swallow — error toast is handled by caller via api.ts */
+    } finally {
+      setOfferBusy(false);
     }
   };
 
@@ -460,6 +500,19 @@ export default function ListingDetailPage() {
                     <MessageSquare size={14} />
                     Message Seller
                   </Button>
+                  {listing.is_negotiable && listing.status === "active" && (
+                    <Button
+                      variant="outlined"
+                      size="sm"
+                      onClick={() => {
+                        setOfferAmount((listing.price_cents / 100).toFixed(2));
+                        setOfferOpen(true);
+                      }}
+                    >
+                      <HandCoins size={14} />
+                      Make offer
+                    </Button>
+                  )}
                   <button
                     onClick={toggleSave}
                     aria-label={saved ? "Unsave" : "Save"}
@@ -489,6 +542,13 @@ export default function ListingDetailPage() {
 
             {isOwner && (
               <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/listing/${listing.id}/edit`}
+                  className="inline-flex h-8 items-center gap-1 border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 text-xs text-[var(--color-secondary)] hover:text-[var(--color-primary)]"
+                >
+                  <Pencil size={14} />
+                  Edit
+                </Link>
                 {listing.status === "active" && (
                   <>
                     <Button
@@ -563,6 +623,79 @@ export default function ListingDetailPage() {
           </div>
         </section>
       )}
+
+      {/* ── Offer modal ── */}
+      <Modal
+        open={offerOpen}
+        onClose={() => {
+          setOfferOpen(false);
+          setOfferAmount("");
+          setOfferNote("");
+        }}
+        title="Make an offer"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setOfferOpen(false);
+                setOfferAmount("");
+                setOfferNote("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={submitOffer}
+              loading={offerBusy}
+              disabled={!offerAmount || parseFloat(offerAmount) <= 0}
+            >
+              Send offer
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-[var(--color-secondary)]">
+              Your offer
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-[var(--color-muted)]">$</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={offerAmount}
+                onChange={(e) => setOfferAmount(e.target.value)}
+                className="h-10 flex-1 border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2 text-sm text-[var(--color-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
+              />
+              <span className="text-xs text-[var(--color-muted)]">
+                listed {formatPrice(listing.price_cents)}
+              </span>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-[var(--color-secondary)]">
+              Note (optional)
+            </label>
+            <Textarea
+              value={offerNote}
+              onChange={(e) => setOfferNote(e.target.value)}
+              placeholder="Anything the seller should know?"
+              rows={3}
+            />
+          </div>
+          <p className="text-[11px] text-[var(--color-muted)]">
+            Sending an offer opens a chat with the seller. They can accept,
+            decline, or counter.
+          </p>
+        </div>
+      </Modal>
 
       {/* ── Report modal ── */}
       <Modal
