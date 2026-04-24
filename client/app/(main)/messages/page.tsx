@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  Suspense,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Send, MessageSquare } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
@@ -84,19 +91,24 @@ interface Message {
   sender_id: string;
   body: string;
   created_at: string;
+  is_read?: boolean;
 }
 
 function MessagesContent() {
   const searchParams = useSearchParams();
   const { user, session, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  const supabase = createClient();
+  // Memoize so the realtime effect doesn't re-subscribe on every render
+  // (supabase-js caches channels by name, and calling .on() on an already-
+  // subscribed channel throws).
+  const supabase = useMemo(() => createClient(), []);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [convoLoading, setConvoLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [msgsLoading, setMsgsLoading] = useState(false);
+  const [otherTyping, setOtherTyping] = useState(false);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -165,25 +177,26 @@ function MessagesContent() {
           sender_id: m.sender_id,
           body: m.body,
           created_at: m.created_at,
+          is_read: m.is_read,
         }));
         setMessages(msgs.reverse());
       })
       .catch(() => toast("Failed to load messages", "error"))
       .finally(() => setMsgsLoading(false));
 
-    // mark as read
-    api.patch(`/messages/read?conversation_id=${activeId}`, {}, token).catch(() => {});
+    // mark as read (server + local state)
+    api.patch(`/conversations/${activeId}/read`, {}, token).catch(() => {});
     setConversations((prev) =>
       prev.map((c) => (c.id === activeId ? { ...c, unread_count: 0 } : c))
     );
   }, [activeId, token, toast]);
 
-  // realtime subscription
+  // realtime: new messages + read receipts
   useEffect(() => {
     if (!activeId || !user) return;
 
-    const channel = supabase
-      .channel(`messages:${activeId}`)
+    const channel = supabase.channel(`messages:${activeId}`);
+    channel
       .on(
         "postgres_changes",
         {
@@ -200,6 +213,7 @@ function MessagesContent() {
             sender_id: raw.sender_id,
             body: raw.body,
             created_at: raw.created_at,
+            is_read: raw.is_read,
           };
           if (msg.sender_id === user.id) return;
           setMessages((prev) => {
@@ -220,6 +234,31 @@ function MessagesContent() {
                 : c
             )
           );
+          // We're actively viewing — the useEffect above already PATCH'd
+          // /read, but any messages that arrive *after* will still be unread
+          // until the next mark-as-read. Fire-and-forget another one.
+          if (token) {
+            api
+              .patch(`/conversations/${activeId}/read`, {}, token)
+              .catch(() => {});
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${activeId}`,
+        },
+        (payload) => {
+          const raw = payload.new as MessageRaw;
+          // Flip local is_read so the "Seen" indicator on sent messages
+          // updates the moment the other party reads them.
+          setMessages((prev) =>
+            prev.map((m) => (m.id === raw.id ? { ...m, is_read: raw.is_read } : m))
+          );
         }
       )
       .subscribe();
@@ -227,7 +266,69 @@ function MessagesContent() {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [activeId, user, supabase, token]);
+
+  // realtime: typing indicator via Supabase presence
+  useEffect(() => {
+    if (!activeId || !user) return;
+    setOtherTyping(false);
+
+    const channel = supabase.channel(`typing:${activeId}`, {
+      config: { presence: { key: user.id } },
+    });
+
+    channel
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState() as Record<
+          string,
+          Array<{ typing?: boolean }>
+        >;
+        const othersTyping = Object.entries(state).some(
+          ([key, metas]) => key !== user.id && metas.some((m) => m.typing)
+        );
+        setOtherTyping(othersTyping);
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ typing: false });
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [activeId, user, supabase]);
+
+  // Broadcast our typing state with debounce.
+  const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(
+    null
+  );
+  useEffect(() => {
+    if (!activeId) {
+      typingChannelRef.current = null;
+      return;
+    }
+    // Grab the same named channel we subscribed above (supabase-js returns
+    // the cached instance).
+    typingChannelRef.current = supabase.channel(`typing:${activeId}`);
+  }, [activeId, supabase]);
+
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const broadcastTyping = useCallback(
+    (isTyping: boolean) => {
+      if (!typingChannelRef.current || !user) return;
+      typingChannelRef.current.track({ typing: isTyping }).catch(() => {});
+    },
+    [user]
+  );
+
+  const handleTypingInput = (value: string) => {
+    setInput(value);
+    if (!activeId) return;
+    broadcastTyping(true);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => broadcastTyping(false), 1500);
+  };
 
   // auto-scroll
   useEffect(() => {
@@ -256,6 +357,8 @@ function MessagesContent() {
     setMessages((prev) => [...prev, optimistic]);
     setInput("");
     setSending(true);
+    broadcastTyping(false);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
 
     try {
       const raw = await api.post<MessageRaw>(
@@ -474,6 +577,13 @@ function MessagesContent() {
                       new Date(msg.created_at).getTime() -
                         new Date(messages[i - 1].created_at).getTime() >
                         300_000;
+                    // Only render "Seen" under the most recent of my own
+                    // messages that the other party has read.
+                    const isLastOwn =
+                      own &&
+                      messages
+                        .slice(i + 1)
+                        .every((m) => m.sender_id !== user.id);
                     return (
                       <div key={msg.id}>
                         {showTime && (
@@ -493,9 +603,25 @@ function MessagesContent() {
                             {msg.body}
                           </div>
                         </div>
+                        {isLastOwn && msg.is_read && (
+                          <p className="mt-0.5 pr-1 text-right text-[10px] text-[var(--color-muted)]">
+                            Seen
+                          </p>
+                        )}
                       </div>
                     );
                   })}
+                  {otherTyping && (
+                    <div className="flex justify-start">
+                      <div className="bg-[var(--color-surface-sunken)] px-3 py-2 text-xs text-[var(--color-muted)]">
+                        <span className="inline-flex gap-0.5">
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-[var(--color-muted)]" />
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-[var(--color-muted)] [animation-delay:120ms]" />
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-[var(--color-muted)] [animation-delay:240ms]" />
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               )}
@@ -508,8 +634,9 @@ function MessagesContent() {
                   ref={inputRef}
                   type="text"
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => handleTypingInput(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onBlur={() => broadcastTyping(false)}
                   placeholder="Type a message…"
                   className="h-10 flex-1 border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 text-sm text-[var(--color-primary)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
                 />

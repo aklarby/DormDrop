@@ -290,11 +290,18 @@ async def archive_conversation(
     return {"success": True}
 
 
-@router.patch("/messages/read")
+@router.patch("/{conversation_id}/read")
 async def mark_messages_read(
     conversation_id: str,
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    """Mark every inbound message in this conversation as read.
+
+    (Previously lived at `/conversations/messages/read?conversation_id=…`,
+    but the client was calling a mismatching `/messages/read` so reads
+    silently 404'd. Moved to `/conversations/:id/read` so the path lines
+    up with the rest of the resource.)
+    """
     supabase = get_supabase()
 
     supabase.table("messages").update({"is_read": True}).eq(

@@ -38,4 +38,8 @@ def user_or_ip_key(request: Request) -> str:
     return _subject_from_request(request) or f"ip:{get_remote_address(request)}"
 
 
-limiter = Limiter(key_func=user_or_ip_key, headers_enabled=True)
+# headers_enabled=False — otherwise slowapi's _inject_headers requires every
+# decorated endpoint to declare a `response: Response` parameter, and raises
+# mid-request for the ones that don't. The 429 body is enough signal; we
+# don't need X-RateLimit-* headers exposed to the frontend.
+limiter = Limiter(key_func=user_or_ip_key, headers_enabled=False)
