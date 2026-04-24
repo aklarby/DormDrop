@@ -1,13 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Plus, MessageSquare, Heart, User, LogOut, Menu, X } from "lucide-react";
+import { Search, Plus, MessageSquare, Heart, User, LogOut, Menu, X, Clock } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useUnreadCount } from "@/hooks/use-unread-count";
 import { Avatar } from "@/components/ui/Avatar";
 import { cn } from "@/lib/utils";
+
+const RECENT_STORAGE_KEY = "dormdrop:recent-searches";
+const RECENT_LIMIT = 6;
+
+function readRecent(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string").slice(0, RECENT_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecent(next: string[]) {
+  try {
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next.slice(0, RECENT_LIMIT)));
+  } catch {
+    /* quota exceeded or storage unavailable — ignore */
+  }
+}
 
 export function Navbar() {
   const pathname = usePathname();
@@ -16,12 +39,44 @@ export function Navbar() {
   const unread = useUnreadCount();
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setRecent(readRecent());
+  }, []);
+
+  useEffect(() => {
+    if (!searchFocused) return;
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node))
+        setSearchFocused(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [searchFocused]);
+
+  const pushRecent = (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const next = [trimmed, ...recent.filter((r) => r.toLowerCase() !== trimmed.toLowerCase())];
+    writeRecent(next);
+    setRecent(next.slice(0, RECENT_LIMIT));
+  };
+
+  const runSearch = (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    pushRecent(trimmed);
+    setSearchQuery("");
+    setSearchFocused(false);
+    router.push(`/browse?search=${encodeURIComponent(trimmed)}`);
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/browse?search=${encodeURIComponent(searchQuery.trim())}`);
-    }
+    runSearch(searchQuery);
   };
 
   const navLinks = [
@@ -42,15 +97,40 @@ export function Navbar() {
         </Link>
 
         <form onSubmit={handleSearch} className="hidden sm:flex flex-1 max-w-md mx-4">
-          <div className="relative w-full">
+          <div ref={searchRef} className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-muted)]" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
               placeholder="Search listings..."
               className="w-full h-9 pl-9 pr-3 text-sm bg-[var(--color-surface)] border border-[var(--color-border-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)] transition-colors"
             />
+            {searchFocused && recent.length > 0 && searchQuery === "" && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 border border-[var(--color-border)] bg-[var(--color-surface-raised)] shadow-lg animate-scale-in">
+                <p className="px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]">
+                  Recent
+                </p>
+                <ul className="pb-1">
+                  {recent.map((query) => (
+                    <li key={query}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          runSearch(query);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-primary)] hover:bg-[var(--color-surface-sunken)]"
+                      >
+                        <Clock className="h-3 w-3 text-[var(--color-muted)]" />
+                        <span className="truncate">{query}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </form>
 

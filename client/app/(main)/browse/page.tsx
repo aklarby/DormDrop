@@ -32,6 +32,7 @@ const SORT_OPTIONS = [
   { value: "newest", label: "Newest" },
   { value: "price_asc", label: "Price: Low \u2192 High" },
   { value: "price_desc", label: "Price: High \u2192 Low" },
+  { value: "ending_soon", label: "Ending soon" },
 ];
 
 const CONDITION_OPTIONS = [
