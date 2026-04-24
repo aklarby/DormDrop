@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Image from "next/image";
-import { Calendar } from "lucide-react";
+import { Calendar, Ban, Flag } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/api";
 import { getSupabaseImageUrl } from "@/lib/utils";
 import { Avatar } from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Spinner";
 import { ListingGrid } from "@/components/listings/ListingGrid";
+import { useToast } from "@/components/ui/Toast";
 
 interface Student {
   id: string;
@@ -34,13 +35,47 @@ interface Listing {
 
 export default function ProfilePage() {
   const { id } = useParams<{ id: string }>();
-  const { session, loading: authLoading } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const token = session?.access_token;
+  const { toast } = useToast();
 
   const [student, setStudent] = useState<Student | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [blocking, setBlocking] = useState(false);
+
+  const isSelf = user?.id === id;
+
+  const blockUser = async () => {
+    if (!token || !student || isSelf) return;
+    if (!window.confirm(`Block ${student.display_name}? You won't see their listings or messages anymore.`)) return;
+    setBlocking(true);
+    try {
+      await api.post("/blocks", { blocked_id: student.id }, token);
+      toast("User blocked", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to block user", "error");
+    } finally {
+      setBlocking(false);
+    }
+  };
+
+  const reportUser = async () => {
+    if (!token || !student || isSelf) return;
+    const reason = window.prompt("Why are you reporting this user?");
+    if (!reason?.trim()) return;
+    try {
+      await api.post(
+        "/reports",
+        { target_type: "student", target_id: student.id, reason: reason.trim() },
+        token
+      );
+      toast("Report submitted", "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to submit report", "error");
+    }
+  };
 
   useEffect(() => {
     if (authLoading || !token) return;
@@ -128,6 +163,27 @@ export default function ProfilePage() {
               Member since {memberSince}
             </span>
           </div>
+          {!isSelf && (
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={reportUser}
+                className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-secondary)] hover:text-[var(--color-primary)]"
+              >
+                <Flag className="w-3 h-3" />
+                Report
+              </button>
+              <button
+                type="button"
+                disabled={blocking}
+                onClick={blockUser}
+                className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-secondary)] hover:text-[var(--color-primary)] disabled:opacity-50"
+              >
+                <Ban className="w-3 h-3" />
+                {blocking ? "Blocking…" : "Block"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
