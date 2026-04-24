@@ -48,6 +48,17 @@ type ListingDetail = {
   };
 };
 
+type SimilarRow = {
+  id: string;
+  title: string;
+  price_cents: number;
+  condition: string;
+  photos: { order: number; path: string }[];
+  created_at: string;
+  seller_display_name: string | null;
+  seller_pfp_path: string | null;
+};
+
 const STATUS_VARIANT: Record<
   string,
   "success" | "warning" | "muted" | "destructive"
@@ -72,6 +83,7 @@ export default function ListingDetailPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
+  const [similar, setSimilar] = useState<SimilarRow[]>([]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const isOwner = user?.id === listing?.student_id;
@@ -103,6 +115,15 @@ export default function ListingDetailPage() {
       /* ignore */
     }
   }, [token, listing, user]);
+
+  // Similar listings (server-side hybrid match on category + condition + title trigram).
+  useEffect(() => {
+    if (!token || !listing) return;
+    api
+      .get<{ data: SimilarRow[] }>(`/listings/similar/${listing.id}?limit=8`, token)
+      .then((res) => setSimilar(res.data ?? []))
+      .catch(() => {});
+  }, [token, listing]);
 
   useEffect(() => {
     if (!token) return;
@@ -505,6 +526,44 @@ export default function ListingDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Similar listings ── */}
+      {similar.length > 0 && (
+        <section className="pt-6 space-y-3">
+          <h2 className="text-sm font-medium text-[var(--color-primary)]">
+            You might also like
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {similar.slice(0, 8).map((s) => (
+              <Link
+                key={s.id}
+                href={`/listing/${s.id}`}
+                className="block border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] transition-shadow hover:shadow-md"
+              >
+                <div className="relative aspect-square bg-[var(--color-surface-sunken)]">
+                  {s.photos?.[0]?.path && (
+                    <Image
+                      src={getSupabaseImageUrl("listing_photos", s.photos[0].path) ?? ""}
+                      alt=""
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 50vw, 25vw"
+                    />
+                  )}
+                </div>
+                <div className="p-2">
+                  <p className="text-xs font-[family-name:var(--font-display)] font-medium text-[var(--color-primary)]">
+                    {formatPrice(s.price_cents)}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-[var(--color-secondary)]">
+                    {s.title}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Report modal ── */}
       <Modal
