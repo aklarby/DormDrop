@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 
 const OTP_LENGTH = 6;
 
-type Step = "email" | "details" | "otp";
+type Step = "email" | "details" | "otp" | "waitlist";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -30,12 +30,29 @@ export default function SignupPage() {
     setValidatingEmail(true);
 
     try {
-      await api.post("/auth/validate-domain", { email });
-      setStep("details");
+      const res = await api.post<{ valid: boolean }>("/auth/validate-domain", { email });
+      if (res.valid) {
+        setStep("details");
+      } else {
+        setStep("waitlist");
+      }
     } catch {
-      setError("Your school is not supported yet.");
+      setError("Couldn't validate this email. Please try again.");
     } finally {
       setValidatingEmail(false);
+    }
+  }
+
+  async function joinWaitlist(note: string) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.post("/auth/waitlist", { email, note: note || null });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to join waitlist");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -328,7 +345,17 @@ export default function SignupPage() {
         </>
       )}
 
-      {step !== "otp" && (
+      {step === "waitlist" && (
+        <WaitlistStep
+          email={email}
+          onBack={() => setStep("email")}
+          onSubmit={joinWaitlist}
+          submitting={submitting}
+          error={error}
+        />
+      )}
+
+      {step !== "otp" && step !== "waitlist" && (
         <p className="mt-5 text-center text-xs text-[var(--color-secondary)]">
           Already have an account?{" "}
           <Link
@@ -339,6 +366,72 @@ export default function SignupPage() {
           </Link>
         </p>
       )}
+    </div>
+  );
+}
+
+function WaitlistStep({
+  email,
+  onBack,
+  onSubmit,
+  submitting,
+  error,
+}: {
+  email: string;
+  onBack: () => void;
+  onSubmit: (note: string) => Promise<void>;
+  submitting: boolean;
+  error: string | null;
+}) {
+  const [note, setNote] = useState("");
+  const [joined, setJoined] = useState(false);
+
+  return (
+    <div className="space-y-3">
+      <div className="border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4">
+        <p className="text-sm text-[var(--color-primary)]">
+          We don&apos;t support {email.split("@")[1] || "your school"} yet.
+        </p>
+        <p className="mt-1 text-xs text-[var(--color-secondary)]">
+          Join the waitlist and we&apos;ll email you when it&apos;s live.
+        </p>
+      </div>
+
+      {joined ? (
+        <div className="border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-4 text-sm text-[var(--color-primary)]">
+          You&apos;re on the list. Thanks!
+        </div>
+      ) : (
+        <>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Anything else we should know? (optional)"
+            rows={3}
+            className="w-full resize-none border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2 text-sm text-[var(--color-primary)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-brand)]"
+          />
+          {error && <p className="text-xs text-[var(--color-destructive)]">{error}</p>}
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={async () => {
+              await onSubmit(note);
+              setJoined(true);
+            }}
+            className="h-10 w-full bg-[var(--color-primary)] text-white text-sm transition-colors duration-200 hover:bg-[var(--color-primary-hover)] disabled:opacity-50 disabled:pointer-events-none"
+          >
+            {submitting ? "Joining\u2026" : "Join waitlist"}
+          </button>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={onBack}
+        className="h-10 w-full border border-[var(--color-border)] bg-[var(--color-surface-raised)] text-sm text-[var(--color-secondary)] transition-colors duration-200 hover:bg-[var(--color-surface)]"
+      >
+        Back
+      </button>
     </div>
   );
 }
