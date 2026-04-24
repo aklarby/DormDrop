@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user, require_college_member
 from app.rate_limit import limiter
+from app.services.moderation import moderate_image
 
 router = APIRouter()
 
@@ -13,7 +14,12 @@ class CreateConversationRequest(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    body: str
+    body: str | None = None
+    photo_path: str | None = None
+
+
+class ArchiveRequest(BaseModel):
+    archived: bool
 
 
 def _reshape_summary(row: dict, user_id: str) -> dict:
@@ -189,9 +195,11 @@ async def send_message(
     from app.services.moderation import moderate_text
 
     body = (req.body or "").strip()
-    if not body:
+    photo_path = (req.photo_path or "").strip() or None
+
+    if not body and not photo_path:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
-    if len(body) > 2000:
+    if body and len(body) > 2000:
         raise HTTPException(status_code=400, detail="Message too long (max 2000 chars)")
 
     supabase = get_supabase()
@@ -210,23 +218,76 @@ async def send_message(
     if conv.data.get("status") == "closed":
         raise HTTPException(status_code=400, detail="Conversation is archived")
 
-    mod = await moderate_text(body)
-    if mod["flagged"]:
-        flagged = ", ".join(mod["categories"].keys()) or "policy"
-        raise HTTPException(
-            status_code=422,
-            detail=f"Message was flagged for: {flagged}. Please revise.",
-        )
+    if body:
+        mod = await moderate_text(body)
+        if mod["flagged"]:
+            flagged = ", ".join(mod["categories"].keys()) or "policy"
+            raise HTTPException(
+                status_code=422,
+                detail=f"Message was flagged for: {flagged}. Please revise.",
+            )
+
+    if photo_path:
+        img_mod = await moderate_image(photo_path, bucket="message_photos")
+        if img_mod["flagged"]:
+            flagged = ", ".join(img_mod["categories"].keys()) or "policy"
+            raise HTTPException(
+                status_code=422,
+                detail=f"Image was flagged for: {flagged}. Please use a different photo.",
+            )
 
     result = supabase.table("messages").insert({
         "conversation_id": conversation_id,
         "sender_id": current_user.id,
-        "body": body,
+        "body": body or "",
+        "type": "image" if photo_path else "text",
+        "photo_path": photo_path,
     }).execute()
 
     # conversations.updated_at is now bumped by the messages_bump_conversation trigger,
     # so the postgrest `.update({})` no-op is gone.
     return result.data[0]
+
+
+@router.get("/search")
+async def search_messages(
+    q: str = Query(..., min_length=2, max_length=80),
+    current_user: CurrentUser = Depends(require_college_member),
+    limit: int = Query(default=20, le=50),
+):
+    """Full-text search over the caller's messages (both inbound and outbound)."""
+    supabase = get_supabase()
+    result = supabase.rpc(
+        "messages_search",
+        {"p_user_id": current_user.id, "p_query": q, "p_limit": limit},
+    ).execute()
+    return {"data": result.data or []}
+
+
+@router.patch("/{conversation_id}/archive")
+async def archive_conversation(
+    conversation_id: str,
+    body: ArchiveRequest,
+    current_user: CurrentUser = Depends(require_college_member),
+):
+    """Flip status between open/closed for the archive toggle."""
+    supabase = get_supabase()
+    conv = (
+        supabase.table("conversations")
+        .select("buyer_id, seller_id")
+        .eq("id", conversation_id)
+        .single()
+        .execute()
+    )
+    if not conv.data:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if current_user.id not in (conv.data["buyer_id"], conv.data["seller_id"]):
+        raise HTTPException(status_code=403, detail="Not your conversation")
+
+    supabase.table("conversations").update({
+        "status": "closed" if body.archived else "open"
+    }).eq("id", conversation_id).execute()
+    return {"success": True}
 
 
 @router.patch("/messages/read")

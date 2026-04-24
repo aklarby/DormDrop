@@ -15,6 +15,7 @@ from app.routers import (
     internal,
     listings,
     offers,
+    push,
     reports,
     reviews,
     saved,
@@ -63,6 +64,7 @@ app.include_router(blocks.router, prefix="/blocks", tags=["blocks"])
 app.include_router(offers.router, prefix="/offers", tags=["offers"])
 app.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
 app.include_router(reviews.router, prefix="/reviews", tags=["reviews"])
+app.include_router(push.router, prefix="/push", tags=["push"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
 
