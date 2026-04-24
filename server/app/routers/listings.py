@@ -8,7 +8,7 @@ from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user, require_college_member
 from app.constants import CATEGORIES, CONDITIONS, LISTING_STATUSES
 from app.rate_limit import limiter
-from app.services.ai_populate import auto_populate_from_image
+from app.services.ai_populate import auto_populate_from_image, auto_populate_from_images
 from app.services.moderation import moderate_image, moderate_text
 from app.services.storage import delete_files, extract_photo_paths
 
@@ -302,6 +302,149 @@ async def extend_listing(
     return result.data[0]
 
 
+class RecordViewRequest(BaseModel):
+    listing_id: str
+
+
+@router.post("/views")
+@limiter.limit("120/hour")
+async def record_view(
+    request: Request,
+    body: RecordViewRequest,
+    current_user: CurrentUser = Depends(require_college_member),
+):
+    """Idempotent per-viewer-per-day view counter for listing analytics."""
+    supabase = get_supabase()
+    supabase.rpc(
+        "record_listing_view",
+        {"p_listing_id": body.listing_id, "p_viewer_id": current_user.id},
+    ).execute()
+    return {"success": True}
+
+
+@router.get("/similar/{listing_id}")
+async def similar(
+    listing_id: str,
+    current_user: CurrentUser = Depends(require_college_member),
+    limit: int = Query(default=8, le=20),
+):
+    supabase = get_supabase()
+    result = supabase.rpc(
+        "similar_listings", {"p_listing_id": listing_id, "p_limit": limit}
+    ).execute()
+    return {"data": result.data or []}
+
+
+@router.get("/trending")
+async def trending(
+    current_user: CurrentUser = Depends(require_college_member),
+    limit: int = Query(default=12, le=30),
+):
+    supabase = get_supabase()
+    result = supabase.rpc(
+        "trending_listings",
+        {"p_college_id": current_user.college_id, "p_limit": limit},
+    ).execute()
+    return {"data": result.data or []}
+
+
+@router.get("/price-guidance")
+async def price_guidance(
+    category: str,
+    condition: str,
+    current_user: CurrentUser = Depends(require_college_member),
+):
+    if category not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    if condition not in CONDITIONS:
+        raise HTTPException(status_code=400, detail="Invalid condition")
+    supabase = get_supabase()
+    result = supabase.rpc(
+        "price_guidance",
+        {
+            "p_college_id": current_user.college_id,
+            "p_category": category,
+            "p_condition": condition,
+        },
+    ).execute()
+    return {"data": (result.data or [{}])[0]}
+
+
+@router.get("/insights/me")
+async def my_insights(current_user: CurrentUser = Depends(require_college_member)):
+    supabase = get_supabase()
+    result = supabase.rpc(
+        "seller_insights", {"p_seller_id": current_user.id}
+    ).execute()
+    return {"data": result.data or []}
+
+
+@router.post("/{listing_id}/relist")
+async def relist(
+    listing_id: str,
+    current_user: CurrentUser = Depends(require_college_member),
+):
+    """Clone an expired/removed listing into a fresh active listing."""
+    supabase = get_supabase()
+    old = (
+        supabase.table("listings")
+        .select("*")
+        .eq("id", listing_id)
+        .single()
+        .execute()
+    )
+    if not old.data:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if old.data["seller_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your listing")
+
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    result = supabase.table("listings").insert({
+        "seller_id": current_user.id,
+        "college_id": old.data["college_id"],
+        "title": old.data["title"],
+        "description": old.data["description"],
+        "category": old.data["category"],
+        "condition": old.data["condition"],
+        "price_cents": old.data["price_cents"],
+        "is_negotiable": old.data["is_negotiable"],
+        "photos": old.data["photos"],
+        "pickup_location": old.data.get("pickup_location"),
+        "expires_at": expires_at,
+    }).execute()
+    return result.data[0]
+
+
+class BulkExtendRequest(BaseModel):
+    days_until_expiry: int = 7
+
+
+@router.post("/bulk-extend")
+async def bulk_extend(
+    body: BulkExtendRequest,
+    current_user: CurrentUser = Depends(require_college_member),
+):
+    """Extend every active listing of mine that expires within N days by 30 days."""
+    supabase = get_supabase()
+    cutoff = (
+        datetime.now(timezone.utc) + timedelta(days=body.days_until_expiry)
+    ).isoformat()
+    existing = (
+        supabase.table("listings")
+        .select("id")
+        .eq("seller_id", current_user.id)
+        .eq("status", "active")
+        .lte("expires_at", cutoff)
+        .execute()
+    )
+    ids = [row["id"] for row in (existing.data or [])]
+    if not ids:
+        return {"success": True, "extended": 0}
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    supabase.table("listings").update({"expires_at": new_expiry}).in_("id", ids).execute()
+    return {"success": True, "extended": len(ids)}
+
+
 class ModerateImageRequest(BaseModel):
     storage_path: str
 
@@ -325,7 +468,8 @@ async def moderate_image_endpoint(
 
 
 class AiPopulateRequest(BaseModel):
-    storage_path: str
+    storage_path: str | None = None
+    storage_paths: list[str] | None = None
 
 
 @router.post("/ai-populate")
@@ -335,9 +479,15 @@ async def ai_populate(
     body: AiPopulateRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    paths = body.storage_paths or ([body.storage_path] if body.storage_path else [])
+    if not paths:
+        raise HTTPException(status_code=400, detail="storage_path(s) required")
+    if len(paths) > 8:
+        raise HTTPException(status_code=400, detail="Up to 8 photos per request")
     try:
-        result = await auto_populate_from_image(body.storage_path)
-        return result
+        if len(paths) == 1 and body.storage_path and not body.storage_paths:
+            return await auto_populate_from_image(paths[0])
+        return await auto_populate_from_images(paths)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI service error: {exc}")
 

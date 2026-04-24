@@ -45,21 +45,39 @@ def get_signed_url(storage_path: str, expires_in: int = 300) -> str:
 
 
 async def auto_populate_from_image(storage_path: str) -> dict:
-    """Download image via signed URL and send to the vision model."""
+    """Single-photo legacy path (preserved for backwards compatibility)."""
+    return await auto_populate_from_images([storage_path])
+
+
+async def auto_populate_from_images(storage_paths: list[str]) -> dict:
+    """v2: accept up to 8 photos, return multiple title candidates,
+    a price range, and a suggested cover index. Keeps the same model
+    string — AI quality tuning happens via the prompt."""
+    if not storage_paths:
+        raise ValueError("At least one storage_path is required")
+
     client = get_openai_client()
-    signed_url = get_signed_url(storage_path)
+    signed_urls = [get_signed_url(p) for p in storage_paths[:8]]
+
+    content: list = [
+        {"type": "text", "text": (
+            "Look at ALL provided photos together — they are different angles of "
+            "the SAME item. Respond with a JSON object containing: "
+            "title (the best pick), title_candidates (array of 2-3 alternative "
+            "concise titles), description, category, condition, price_cents "
+            "(your single best estimate), price_range {min_cents, max_cents}, "
+            "is_negotiable, cover_index (0-based index of the photo that "
+            "best represents this item)."
+        )},
+    ]
+    for url in signed_urls:
+        content.append({"type": "image_url", "image_url": {"url": url}})
 
     response = client.chat.completions.create(
         model="gpt-5.4-nano",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": signed_url}},
-                    {"type": "text", "text": "What is this item? Describe it accurately and generate a listing. Only mention brand/model/specs if you can actually see them — otherwise just describe what the item is."},
-                ],
-            },
+            {"role": "user", "content": content},
         ],
         response_format={"type": "json_object"},
     )
@@ -72,7 +90,6 @@ async def auto_populate_from_image(storage_path: str) -> dict:
 
     if data.get("category") not in CATEGORIES:
         data["category"] = None
-
     if data.get("condition") not in CONDITIONS:
         data["condition"] = None
 
