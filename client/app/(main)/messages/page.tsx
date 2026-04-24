@@ -118,13 +118,15 @@ function MessagesContent() {
 
   const active = conversations.find((c) => c.id === activeId) ?? null;
 
-  // fetch conversation list
-  useEffect(() => {
-    if (!token || !user) return;
-    setConvoLoading(true);
-    api
-      .get<{ data: ConversationRaw[] }>("/conversations", token)
-      .then((res) => {
+  const loadConversations = useCallback(
+    async (opts: { showSpinner?: boolean } = {}) => {
+      if (!token || !user) return;
+      if (opts.showSpinner) setConvoLoading(true);
+      try {
+        const res = await api.get<{ data: ConversationRaw[] }>(
+          "/conversations",
+          token
+        );
         const mapped: Conversation[] = (res.data ?? []).map((c) => {
           const isBuyer = c.buyer_id === user.id;
           const other = c.other_user ?? (isBuyer ? c.seller : c.buyer);
@@ -148,10 +150,56 @@ function MessagesContent() {
           };
         });
         setConversations(mapped);
-      })
-      .catch(() => toast("Failed to load conversations", "error"))
-      .finally(() => setConvoLoading(false));
-  }, [token, user, toast]);
+      } catch {
+        if (opts.showSpinner) toast("Failed to load conversations", "error");
+      } finally {
+        if (opts.showSpinner) setConvoLoading(false);
+      }
+    },
+    [token, user, toast]
+  );
+
+  useEffect(() => {
+    loadConversations({ showSpinner: true });
+  }, [loadConversations]);
+
+  // Realtime: pick up new conversations where the caller is seller or buyer
+  // (new buyer-initiated chats, or new seller-owned chats opened in another
+  // tab) without a page refresh. Payload only contains raw conversations
+  // columns, so we re-fetch the enriched list instead of patching state in
+  // place.
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase.channel(`conversations:${user.id}`);
+    const onInsert = () => loadConversations();
+    channel
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversations",
+          filter: `seller_id=eq.${user.id}`,
+        },
+        onInsert
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversations",
+          filter: `buyer_id=eq.${user.id}`,
+        },
+        onInsert
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, supabase, loadConversations]);
 
   // auto-open from URL param after conversations load
   useEffect(() => {
