@@ -86,6 +86,24 @@ export default function ListingDetailPage() {
       .finally(() => setLoading(false));
   }, [id, token]);
 
+  // Record a view (idempotent per viewer per day on the server).
+  useEffect(() => {
+    if (!token || !listing) return;
+    if (listing.student_id && user?.id === listing.student_id) return;
+    api.post("/listings/views", { listing_id: listing.id }, token).catch(() => {});
+
+    // Local "recently viewed" log (W7).
+    try {
+      const key = "dormdrop:recently-viewed";
+      const raw = window.localStorage.getItem(key);
+      const existing = raw ? (JSON.parse(raw) as string[]) : [];
+      const next = [listing.id, ...existing.filter((x) => x !== listing.id)].slice(0, 10);
+      window.localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  }, [token, listing, user]);
+
   useEffect(() => {
     if (!token) return;
     api
