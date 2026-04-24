@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.dependencies import get_supabase
-from app.middleware.auth import CurrentUser, get_current_user
+from app.middleware.auth import CurrentUser, require_college_member
+from app.rate_limit import limiter
 from app.constants import REPORT_TARGET_TYPES
 
 router = APIRouter()
@@ -15,14 +16,18 @@ class CreateReportRequest(BaseModel):
 
 
 @router.post("")
+@limiter.limit("20/day")
 async def create_report(
+    request: Request,
     body: CreateReportRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_college_member),
 ):
     if body.target_type not in REPORT_TARGET_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid target type: {body.target_type}")
     if not body.reason.strip():
         raise HTTPException(status_code=400, detail="Reason is required")
+    if len(body.reason) > 500:
+        raise HTTPException(status_code=400, detail="Reason too long (max 500 chars)")
 
     supabase = get_supabase()
 

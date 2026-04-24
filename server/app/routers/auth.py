@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -21,8 +22,14 @@ class CompleteSignupRequest(BaseModel):
     display_name: str
 
 
+class WaitlistRequest(BaseModel):
+    email: str
+    note: str | None = None
+
+
 @router.post("/validate-domain", response_model=ValidateDomainResponse)
-async def validate_domain(body: ValidateDomainRequest):
+@limiter.limit("30/minute")
+async def validate_domain(request: Request, body: ValidateDomainRequest):
     domain = body.email.split("@")[-1] if "@" in body.email else ""
     if not domain:
         raise HTTPException(status_code=400, detail="Invalid email format")
@@ -36,7 +43,7 @@ async def validate_domain(body: ValidateDomainRequest):
         .execute()
     )
 
-    if not result.data:
+    if not result or not result.data:
         return ValidateDomainResponse(valid=False)
 
     return ValidateDomainResponse(
@@ -46,8 +53,27 @@ async def validate_domain(body: ValidateDomainRequest):
     )
 
 
+@router.post("/waitlist")
+@limiter.limit("30/minute")
+async def join_waitlist(request: Request, body: WaitlistRequest):
+    """Record an email + domain for a school we don't support yet."""
+    if "@" not in body.email:
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    domain = body.email.split("@")[-1].lower()
+    supabase = get_supabase()
+    supabase.table("waitlists").upsert({
+        "email": body.email.lower(),
+        "domain": domain,
+        "note": (body.note or None),
+    }).execute()
+    return {"success": True}
+
+
 @router.post("/complete-signup")
+@limiter.limit("5/hour")
 async def complete_signup(
+    request: Request,
     body: CompleteSignupRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -77,10 +103,14 @@ async def complete_signup(
     if not college_resp or not college_resp.data:
         raise HTTPException(status_code=400, detail="College not found for this email domain")
 
+    display_name = (body.display_name or "").strip()
+    if not display_name or len(display_name) > 80:
+        raise HTTPException(status_code=400, detail="Display name must be 1-80 characters")
+
     supabase.table("students").insert({
         "id": current_user.id,
         "college_id": college_resp.data["id"],
-        "display_name": body.display_name,
+        "display_name": display_name,
     }).execute()
 
     return {"success": True}

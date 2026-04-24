@@ -1,12 +1,13 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 
 from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user, require_college_member
 from app.constants import CATEGORIES, CONDITIONS, LISTING_STATUSES
+from app.rate_limit import limiter
 from app.services.ai_populate import auto_populate_from_image
 from app.services.moderation import moderate_image, moderate_text
 from app.services.storage import delete_files, extract_photo_paths
@@ -129,7 +130,9 @@ async def get_listing(
 
 
 @router.post("")
+@limiter.limit("10/hour")
 async def create_listing(
+    request: Request,
     body: CreateListingRequest,
     current_user: CurrentUser = Depends(require_college_member),
 ):
@@ -276,7 +279,9 @@ class ModerateImageRequest(BaseModel):
 
 
 @router.post("/moderate-image")
+@limiter.limit("30/hour")
 async def moderate_image_endpoint(
+    request: Request,
     body: ModerateImageRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -296,7 +301,9 @@ class AiPopulateRequest(BaseModel):
 
 
 @router.post("/ai-populate")
+@limiter.limit("10/hour")
 async def ai_populate(
+    request: Request,
     body: AiPopulateRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.dependencies import get_supabase
 from app.middleware.auth import CurrentUser, get_current_user, require_college_member
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -178,7 +179,9 @@ async def get_messages(
 
 
 @router.post("/{conversation_id}/messages")
+@limiter.limit("60/hour")
 async def send_message(
+    request: Request,
     conversation_id: str,
     req: SendMessageRequest,
     current_user: CurrentUser = Depends(require_college_member),
