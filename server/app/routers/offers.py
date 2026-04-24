@@ -59,11 +59,22 @@ async def create_offer(
 
     offer = result.data[0]
 
-    # Drop a system message so the accept/decline UI renders inline.
+    # Drop a system message so the client can render the accept/decline card
+    # inline. `type='system'` + a JSON metadata payload means the messages
+    # list can switch on kind without string-parsing the body.
     supabase.table("messages").insert({
         "conversation_id": body.conversation_id,
         "sender_id": current_user.id,
-        "body": f"[offer] ${body.amount_cents / 100:.2f}",
+        "body": f"Offer: ${body.amount_cents / 100:.2f}",
+        "type": "system",
+        "metadata": {
+            "kind": "offer",
+            "offer_id": offer["id"],
+            "amount_cents": body.amount_cents,
+            "note": body.note or None,
+            "buyer_id": current_user.id,
+            "seller_id": conv.data["seller_id"],
+        },
     }).execute()
 
     return offer
@@ -124,7 +135,14 @@ async def update_offer(
     supabase.table("messages").insert({
         "conversation_id": o["conversation_id"],
         "sender_id": current_user.id,
-        "body": f"[offer-{body.status}] ${o['amount_cents'] / 100:.2f}",
+        "body": f"Offer {body.status}: ${o['amount_cents'] / 100:.2f}",
+        "type": "system",
+        "metadata": {
+            "kind": "offer_update",
+            "offer_id": offer_id,
+            "amount_cents": o["amount_cents"],
+            "status": body.status,
+        },
     }).execute()
 
     return updated

@@ -9,7 +9,7 @@ import {
   Suspense,
 } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Send, MessageSquare } from "lucide-react";
+import { ArrowLeft, Send, MessageSquare, HandCoins, Check, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/hooks/use-auth";
@@ -76,6 +76,25 @@ interface Conversation {
   unread_count: number;
 }
 
+type OfferStatus = "pending" | "accepted" | "declined" | "withdrawn" | "expired";
+
+type MessageMetadata =
+  | {
+      kind: "offer";
+      offer_id: string;
+      amount_cents: number;
+      note?: string | null;
+      buyer_id: string;
+      seller_id: string;
+    }
+  | {
+      kind: "offer_update";
+      offer_id: string;
+      amount_cents: number;
+      status: OfferStatus;
+    }
+  | Record<string, unknown>;
+
 interface MessageRaw {
   id: string;
   conversation_id: string;
@@ -83,6 +102,8 @@ interface MessageRaw {
   body: string;
   created_at: string;
   is_read: boolean;
+  type?: "text" | "image" | "system";
+  metadata?: MessageMetadata | null;
 }
 
 interface Message {
@@ -92,6 +113,8 @@ interface Message {
   body: string;
   created_at: string;
   is_read?: boolean;
+  type?: "text" | "image" | "system";
+  metadata?: MessageMetadata | null;
 }
 
 function MessagesContent() {
@@ -226,6 +249,8 @@ function MessagesContent() {
           body: m.body,
           created_at: m.created_at,
           is_read: m.is_read,
+          type: m.type,
+          metadata: m.metadata ?? null,
         }));
         setMessages(msgs.reverse());
       })
@@ -262,6 +287,8 @@ function MessagesContent() {
             body: raw.body,
             created_at: raw.created_at,
             is_read: raw.is_read,
+            type: raw.type,
+            metadata: raw.metadata ?? null,
           };
           if (msg.sender_id === user.id) return;
           setMessages((prev) => {
@@ -376,6 +403,80 @@ function MessagesContent() {
     broadcastTyping(true);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => broadcastTyping(false), 1500);
+  };
+
+  // Offer state is derived from the messages themselves: kind='offer_update'
+  // rows resolve earlier kind='offer' rows with the same offer_id. Legacy
+  // `[offer] $X` / `[offer-accepted] $X` rows (pre-system-messages) parse
+  // similarly via a simple regex fallback.
+  const offerStatusById = useMemo(() => {
+    const map = new Map<string, OfferStatus>();
+    for (const m of messages) {
+      if (m.type === "system" && m.metadata && (m.metadata as { kind?: string }).kind === "offer_update") {
+        const md = m.metadata as { offer_id?: string; status?: OfferStatus };
+        if (md.offer_id && md.status) map.set(md.offer_id, md.status);
+      }
+    }
+    return map;
+  }, [messages]);
+
+  const [offerActing, setOfferActing] = useState<string | null>(null);
+
+  const actOnOffer = async (offerId: string, action: "accepted" | "declined" | "withdrawn") => {
+    if (!token) return;
+    setOfferActing(offerId);
+    try {
+      await api.patch(`/offers/${offerId}`, { status: action }, token);
+      // The server drops a kind='offer_update' system message, which flows
+      // back in via realtime and flips the card state through offerStatusById.
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to update offer", "error");
+    } finally {
+      setOfferActing(null);
+    }
+  };
+
+  const parseOfferMetadata = (msg: Message): {
+    kind: "offer" | "offer_update" | null;
+    offerId: string | null;
+    amountCents: number | null;
+    status: OfferStatus | null;
+    note: string | null;
+  } => {
+    const md = msg.metadata as
+      | {
+          kind?: string;
+          offer_id?: string;
+          amount_cents?: number;
+          status?: OfferStatus;
+          note?: string | null;
+        }
+      | null
+      | undefined;
+    if (msg.type === "system" && md && (md.kind === "offer" || md.kind === "offer_update")) {
+      return {
+        kind: md.kind,
+        offerId: md.offer_id ?? null,
+        amountCents: md.amount_cents ?? null,
+        status: md.status ?? null,
+        note: md.note ?? null,
+      };
+    }
+    // Legacy string-prefix fallback.
+    const legacy = msg.body?.match(
+      /^\[offer(?:-(accepted|declined|withdrawn|expired))?\]\s*\$([\d.]+)/
+    );
+    if (legacy) {
+      const [, status, dollars] = legacy;
+      return {
+        kind: status ? "offer_update" : "offer",
+        offerId: null,
+        amountCents: Math.round(parseFloat(dollars) * 100),
+        status: (status as OfferStatus | undefined) ?? null,
+        note: null,
+      };
+    }
+    return { kind: null, offerId: null, amountCents: null, status: null, note: null };
   };
 
   // auto-scroll
@@ -625,13 +726,130 @@ function MessagesContent() {
                       new Date(msg.created_at).getTime() -
                         new Date(messages[i - 1].created_at).getTime() >
                         300_000;
-                    // Only render "Seen" under the most recent of my own
-                    // messages that the other party has read.
                     const isLastOwn =
                       own &&
                       messages
                         .slice(i + 1)
                         .every((m) => m.sender_id !== user.id);
+
+                    const parsed = parseOfferMetadata(msg);
+
+                    // Offer creation — render as a card with amount + (for
+                    // the seller, on active pending offers) accept/decline.
+                    if (parsed.kind === "offer" && parsed.amountCents !== null) {
+                      const resolved =
+                        (parsed.offerId && offerStatusById.get(parsed.offerId)) || null;
+                      const isSeller = active && user.id === active.other_user.id
+                        ? false
+                        : msg.sender_id !== user.id; // receiver of the offer is the seller
+                      const canAct =
+                        isSeller && !resolved && parsed.offerId !== null;
+                      return (
+                        <div key={msg.id}>
+                          {showTime && (
+                            <p className="my-2 text-center text-[10px] text-[var(--color-muted)]">
+                              {timeAgo(msg.created_at)}
+                            </p>
+                          )}
+                          <div
+                            className={cn(
+                              "flex",
+                              own ? "justify-end" : "justify-start"
+                            )}
+                          >
+                            <div className="max-w-[85%] border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-3 text-sm">
+                              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--color-muted)]">
+                                <HandCoins size={12} />
+                                {own ? "You offered" : "Offer received"}
+                              </div>
+                              <p className="mt-1 font-[family-name:var(--font-display)] text-lg font-semibold text-[var(--color-primary)]">
+                                ${(parsed.amountCents / 100).toFixed(2)}
+                              </p>
+                              {parsed.note && (
+                                <p className="mt-1 text-xs text-[var(--color-secondary)]">
+                                  {parsed.note}
+                                </p>
+                              )}
+                              {resolved && (
+                                <p
+                                  className={cn(
+                                    "mt-2 text-xs",
+                                    resolved === "accepted"
+                                      ? "text-[var(--color-brand)]"
+                                      : "text-[var(--color-muted)]"
+                                  )}
+                                >
+                                  Offer {resolved}
+                                </p>
+                              )}
+                              {canAct && parsed.offerId && (
+                                <div className="mt-2 flex gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={offerActing === parsed.offerId}
+                                    onClick={() =>
+                                      actOnOffer(parsed.offerId!, "accepted")
+                                    }
+                                    className="inline-flex items-center gap-1 bg-[var(--color-brand)] px-2 py-1 text-xs text-white hover:bg-[var(--color-brand-light)] disabled:opacity-50"
+                                  >
+                                    <Check size={12} />
+                                    Accept
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={offerActing === parsed.offerId}
+                                    onClick={() =>
+                                      actOnOffer(parsed.offerId!, "declined")
+                                    }
+                                    className="inline-flex items-center gap-1 border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-secondary)] hover:text-[var(--color-primary)] disabled:opacity-50"
+                                  >
+                                    <X size={12} />
+                                    Decline
+                                  </button>
+                                </div>
+                              )}
+                              {own && !resolved && parsed.offerId && (
+                                <button
+                                  type="button"
+                                  disabled={offerActing === parsed.offerId}
+                                  onClick={() =>
+                                    actOnOffer(parsed.offerId!, "withdrawn")
+                                  }
+                                  className="mt-2 text-xs text-[var(--color-muted)] hover:text-[var(--color-destructive)] disabled:opacity-50"
+                                >
+                                  Withdraw
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {isLastOwn && msg.is_read && (
+                            <p className="mt-0.5 pr-1 text-right text-[10px] text-[var(--color-muted)]">
+                              Seen
+                            </p>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Offer updates (accepted/declined/withdrawn) render as
+                    // a tiny centered chip.
+                    if (parsed.kind === "offer_update" && parsed.status) {
+                      return (
+                        <div key={msg.id}>
+                          {showTime && (
+                            <p className="my-2 text-center text-[10px] text-[var(--color-muted)]">
+                              {timeAgo(msg.created_at)}
+                            </p>
+                          )}
+                          <p className="my-1 text-center text-[11px] text-[var(--color-muted)]">
+                            Offer {parsed.status}
+                            {parsed.amountCents != null &&
+                              ` — $${(parsed.amountCents / 100).toFixed(2)}`}
+                          </p>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={msg.id}>
                         {showTime && (
