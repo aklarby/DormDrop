@@ -27,13 +27,25 @@ interface ConversationRaw {
     id: string;
     display_name: string;
     pfp_path: string | null;
-  };
+  } | null;
   seller: {
     id: string;
     display_name: string;
     pfp_path: string | null;
     venmo_handle: string | null;
-  };
+  } | null;
+  other_user?: {
+    id: string;
+    display_name: string;
+    pfp_path: string | null;
+    venmo_handle?: string | null;
+  } | null;
+  last_message: {
+    body: string;
+    sender_id: string | null;
+    created_at: string;
+  } | null;
+  unread_count: number;
 }
 
 interface Conversation {
@@ -103,18 +115,24 @@ function MessagesContent() {
       .then((res) => {
         const mapped: Conversation[] = (res.data ?? []).map((c) => {
           const isBuyer = c.buyer_id === user.id;
-          const other = isBuyer ? c.seller : c.buyer;
+          const other = c.other_user ?? (isBuyer ? c.seller : c.buyer);
           return {
             id: c.id,
             listing: { id: c.listings.id, title: c.listings.title, photos: c.listings.photos },
             other_user: {
-              id: other.id,
-              display_name: other.display_name,
-              pfp_path: other.pfp_path,
-              venmo_handle: isBuyer ? c.seller.venmo_handle : null,
+              id: other?.id ?? "",
+              display_name: other?.display_name ?? "Unknown",
+              pfp_path: other?.pfp_path ?? null,
+              venmo_handle: isBuyer ? c.seller?.venmo_handle ?? null : null,
             },
-            last_message: null,
-            unread_count: 0,
+            last_message: c.last_message
+              ? {
+                  body: c.last_message.body,
+                  sender_id: c.last_message.sender_id ?? "",
+                  created_at: c.last_message.created_at,
+                }
+              : null,
+            unread_count: c.unread_count ?? 0,
           };
         });
         setConversations(mapped);
